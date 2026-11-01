@@ -1,0 +1,29 @@
+# Build context exclusions for both server images.
+# Keeping the context small also keeps accidental secrets out of any layer.
+.git
+.gitignore
+.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/*.egg-info
+docs
+tests
+scripts
+deploy/docker-compose.yml
+**/uv.lock
+.env
+.env.*
+**/.env
+**/.env.*
+**/*.token
+**/*.secret
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*service-account*.json
+**/*service_account*.json
+**/credentials.json
+**/client_secret*.json
+**/application_default_credentials.json

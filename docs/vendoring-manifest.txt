@@ -1,0 +1,21 @@
+# Vendored source provenance manifest
+# Generated 2026-11-01T11:48:55Z
+#
+# Origins are recorded as repository-relative names, not absolute host paths:
+# the checkout location on the authoring machine is not part of this project and
+# must not be needed to verify the copies. The authoritative, machine-checkable
+# record of *content* is docs/integrity-manifest.json.
+
+## play-console
+origin: google-operations-mcp/play-console
+head: 74d2d2f6438a940307a0c7855bc3842df7a91a72
+commit: 74d2d2f6438a940307a0c7855bc3842df7a91a72 Harden Play MCP read-only transport
+commit: ce615bc824bf3749bdecbde7a0031d3623710019 Build read-only Play Console stdio MCP
+files: 26 tracked
+
+## search-console
+origin: google-operations-mcp/search-console
+head: 06aa911e8c82e30731dad454324b0df455ff73a8
+commit: 06aa911e8c82e30731dad454324b0df455ff73a8 Harden Search Console MCP trust boundaries
+commit: ac9b8a5c4cc06658c2ab7b0a4e1f6f9df0b74fa2 Build read-only Search Console stdio MCP
+files: 27 tracked

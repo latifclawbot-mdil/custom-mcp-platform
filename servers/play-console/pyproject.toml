@@ -1,0 +1,29 @@
+[project]
+name = "play-console-mcp"
+version = "0.1.0"
+description = "Read-only Google Play Console (Android Publisher API v3) stdio MCP server"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp==2.3.0",
+    "google-auth==2.55.1",
+    "httpx==0.28.1",
+    "requests==2.32.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.4.2",
+    "pytest-asyncio==1.1.0",
+    "pytest-timeout==2.4.0",
+    "respx==0.22.0",
+]
+
+[project.scripts]
+play-console-mcp = "play_console_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/play_console_mcp"]

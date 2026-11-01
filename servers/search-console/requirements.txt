@@ -1,0 +1,9 @@
+# Runtime pins. Exact, because this server is meant to be dropped into a
+# LiteLLM MCP gateway where a silent minor bump upstream is not acceptable.
+mcp==2.3.0
+google-auth==2.55.1
+requests>=2.31,<3
+
+# Test-only
+pytest==9.2.0
+pytest-asyncio==1.4.1

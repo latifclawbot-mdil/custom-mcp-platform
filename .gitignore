@@ -1,0 +1,66 @@
+# Both images run as uid 10001 and need nothing writable.
+# These rules also make it explicit that credentials never live here.
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+.python-version
+
+# --- Credentials and secrets: never commit any of these ----------------------
+# Secret material lives outside the repository (see deploy/docker-compose.yml).
+# The patterns below are the ones that actually show up in practice; keep them
+# broad enough to catch a renamed copy and specific enough not to hide source.
+
+# Token files in every spelling a secret manager or an operator might use.
+*.token
+*_token
+*.token.txt
+token.txt
+*.secret
+*secret*.txt
+
+# Google service-account and OAuth client credential JSON (matched anywhere:
+# they are often dropped in a subdirectory, not just at the root).
+*service_account*.json
+*service-account*.json
+**/service_account*.json
+**/*-credentials.json
+**/client_secret*.json
+credentials.json
+**/application_default_credentials.json
+
+# Private keys and certificates.
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Environment files. The tracked compose file reads its variables from the
+# real environment, never from a committed .env.
+.env
+.env.*
+!.env.example
+deploy/.env
+deploy/.env.*
+
+# The contextual-credentials file gcloud leaves behind.
+.gcloud/
+
+# Local deployment overrides that may contain paths or values specific to one
+# host; the tracked compose file is the source of truth.
+deploy/*.local.yml
+deploy/docker-compose.override.yml
+
+# Explicitly keep the Search Console requirement list (it is source, not a
+# secret, and the earlier `*_token`-style rules must not swallow it).
+!servers/search-console/requirements.txt
+
+# --- Build output ------------------------------------------------------------
+dist/
+build/
+**/build/
+*.orig
+*.rej
+*.whl
+*.tar.gz

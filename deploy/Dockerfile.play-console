@@ -1,0 +1,72 @@
+# syntax=docker/dockerfile:1
+#
+# Play Console MCP over authenticated MCP Streamable HTTP.
+#
+# Build context is the repository root (the image needs the shared transport
+# package as well as this server):
+#
+#   docker build -f deploy/Dockerfile.play-console -t play-console-mcp:local .
+#
+# Properties this file is designed to have, each with the reason it matters:
+# * non-root (uid/gid 10001) — a compromised server cannot write to the image;
+# * no secret in any layer — the token arrives as an environment variable or a
+#   mounted file at run time, and nothing is baked in;
+# * only this server's package is installed — the Search Console code is not
+#   present in this image, so a bug in one server cannot reach the other;
+# * pinned base image and fully pinned dependencies (deploy/constraints.txt);
+# * no shell loop, no init system, one process per container.
+
+FROM python:3.11.15-slim-bookworm AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /build
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Dependencies first: this layer is cached until the pins change.
+COPY deploy/constraints.txt /build/constraints.txt
+RUN pip install --no-deps -r /build/constraints.txt
+
+# Only the transport package and this one server.
+COPY packages/mcp_http_transport /build/packages/mcp_http_transport
+COPY servers/play-console /build/servers/play-console
+
+RUN pip install --no-deps \
+        /build/packages/mcp_http_transport \
+        /build/servers/play-console \
+    && find /opt/venv -name '__pycache__' -type d -prune -exec rm -rf {} + \
+    && find /opt/venv -name '*.pyc' -delete
+
+
+FROM python:3.11.15-slim-bookworm AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH= \
+    PATH="/opt/venv/bin:$PATH" \
+    MCP_HTTP_HOST=0.0.0.0 \
+    MCP_HTTP_PORT=8080 \
+    MCP_HTTP_PATH=/mcp
+
+# A fixed, high uid with no shell and no home directory.
+RUN groupadd --gid 10001 mcp \
+    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin mcp
+
+COPY --from=builder /opt/venv /opt/venv
+
+USER 10001:10001
+WORKDIR /app
+
+EXPOSE 8080
+
+# Socket-level liveness only: the MCP endpoint requires a bearer token, so an
+# HTTP check would need the secret inside the image. A TCP connect proves the
+# process is accepting connections without leaking or embedding anything.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import socket,sys; s=socket.socket(); s.settimeout(3); sys.exit(0 if s.connect_ex(('127.0.0.1',8080))==0 else 1)"]
+
+ENTRYPOINT ["python", "-m", "play_console_mcp.http_main"]
