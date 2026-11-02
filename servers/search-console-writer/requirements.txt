@@ -1,0 +1,18 @@
+# Runtime pins. Exact, because this server holds a credential that can mutate
+# Search Console state and must not drift silently.
+mcp==2.3.0
+google-auth==2.55.1
+requests==2.32.5
+
+# Also required at runtime, from the workspace (not PyPI):
+#   mcp-http-transport  (../../packages/mcp_http_transport, editable)
+# It provides the authenticated HTTP entry point. Install it with
+#   pip install -e ../../packages/mcp_http_transport
+# if you are not installing this project through pyproject.toml.
+
+# Test-only
+pytest==8.4.2
+pytest-asyncio==1.1.0
+pytest-timeout==2.4.0
+httpx==0.28.1
+uvicorn==0.54.0
