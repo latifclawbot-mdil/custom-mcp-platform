@@ -24,6 +24,7 @@ ErrorCode = Literal[
     "upstream_error",
     "network_error",
     "invalid_response",
+    "unexpected_redirect",
     "ambiguous_outcome",
 ]
 
@@ -39,9 +40,25 @@ ERROR_CODES: frozenset[str] = frozenset(
         "upstream_error",
         "network_error",
         "invalid_response",
+        "unexpected_redirect",
         "ambiguous_outcome",
     ]
 )
+
+#: Hard caps on what an envelope may carry. An upstream message or header is
+#: untrusted input; without a bound it is reflected verbatim into the calling
+#: model's context, where size is a real (cost and prompt-injection) concern.
+MAX_MESSAGE_LEN = 4096
+MAX_DETAIL_LEN = 512
+
+
+def _truncate(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    marker = "...[truncated]"
+    if limit <= len(marker):
+        return text[:limit]
+    return text[: limit - len(marker)] + marker
 
 # Ordered: longer, more specific patterns first so a URL is not half-eaten by
 # the numeric rule before the URL rule sees it.
@@ -106,8 +123,10 @@ class GscError(Exception):
         if code not in ERROR_CODES:
             raise ValueError(f"unknown error code: {code!r}")
         self.code = code
-        self.message = redact(message)
-        self.details = {k: redact(v) for k, v in (details or {}).items()}
+        self.message = _truncate(redact(message), MAX_MESSAGE_LEN)
+        self.details = {
+            k: _truncate(redact(v), MAX_DETAIL_LEN) for k, v in (details or {}).items()
+        }
         super().__init__(f"{code}: {self.message}")
 
     def to_payload(self) -> dict[str, Any]:
@@ -152,6 +171,25 @@ class EmptyAllowlistError(NotConfiguredError):
     Subclasses :class:`NotConfiguredError` so callers that only know about the
     general case still catch it, while ``__main__`` can catch this specific type
     to print a startup message and exit non-zero.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class CredentialError(NotConfiguredError):
+    """Raised when a usable write credential cannot be obtained.
+
+    It is a :class:`NotConfiguredError` — and therefore maps to the
+    ``not_configured`` code — because that is the actionable truth: the operator
+    has a configuration to fix, and the error message says which variable to
+    set. Reporting it as a generic ``upstream_error`` (which is what a plain
+    ``RuntimeError`` produced) hides the fix and implies the remote service
+    misbehaved.
+
+    Messages are written to be safe to return: provider error *types* are
+    included, but service-account file paths and principal addresses are not,
+    and the base constructor redacts whatever remains.
     """
 
     def __init__(self, message: str) -> None:

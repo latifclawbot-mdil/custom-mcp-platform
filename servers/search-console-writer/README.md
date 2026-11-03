@@ -100,8 +100,19 @@ MCP_HTTP_AUTH_TOKEN=... GSC_WRITE_ALLOWED_SITES='sc-domain:example.com' \
   `may_have_applied: true`. A connect timeout (request never sent) is
   `network_error` with `may_have_applied: false`. The caller must reconcile
   before retrying.
+- **Redirects are never followed.** The request is sent with
+  `allow_redirects=False`; a `3xx` is `unexpected_redirect` (never a success),
+  and a non-empty response history is refused. A `307`/`308` therefore cannot
+  re-send a `PUT`/`DELETE` to the host named in a `Location` header.
+- **Untrusted upstream text is bounded.** Error messages are capped (and marked
+  when truncated); a `Retry-After` header is accepted only as delta-seconds or
+  an HTTP-date and dropped otherwise.
 - **Redacted errors.** Structured envelopes, stable codes, no tracebacks, no
   upstream hostnames, URLs, numeric IDs, or bearer tokens.
+- **Actionable credential errors.** A missing or unusable credential is
+  `not_configured` with the variable to set, not a generic `upstream_error`.
+- **Fixed numeric settings.** A malformed `MCP_HTTP_MAX_SESSIONS` or
+  `MCP_HTTP_SESSION_IDLE_TIMEOUT` exits 2 with one line rather than a traceback.
 - **Zero network in tests.** The suite installs a process-wide guard that
   rejects any `connect()` to a non-loopback address.
 

@@ -86,9 +86,11 @@ from search_console_writer.server import build_registry
 
 registry = build_registry(PropertyAllowlist(["sc-domain:example.com"]))
 result = registry.call("gsc_add_site", {"site_url": "sc-domain:example.com"})
+_payload = json.loads(result.text).get("error", {})
 print(json.dumps({
     "adc_calls": len(calls),
-    "code": json.loads(result.text).get("error", {}).get("code"),
+    "code": _payload.get("code"),
+    "message": _payload.get("message", ""),
 }))
 """
 
@@ -121,5 +123,7 @@ def test_rejected_calls_never_touch_adc(tmp_path):
 def test_a_valid_call_does_reach_adc_exactly_once(tmp_path):
     out = _run(VALID_PROBE, tmp_path)
     assert out["adc_calls"] == 1
-    # ADC failing is reported cleanly, not as a traceback.
-    assert out["code"] in ("upstream_error", "network_error")
+    # ADC failing is reported cleanly, not as a traceback, and as the
+    # actionable configuration code rather than a generic upstream failure.
+    assert out["code"] == "not_configured"
+    assert "GSC_WRITE_SERVICE_ACCOUNT_FILE" in out["message"]

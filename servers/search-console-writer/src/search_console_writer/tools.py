@@ -225,6 +225,9 @@ class ToolRegistry:
             client = self._client_factory()
             payload = spec.handler(client, args, normalized)
         except GscError as exc:
+            # Includes CredentialError (a NotConfiguredError): a credential
+            # problem is an actionable configuration error, and its message
+            # already says which variable to set. Redaction happens in GscError.
             return self._error(envelope_tool=name, err=exc)
         except Exception as exc:  # never let a traceback reach the caller
             err = GscError(

@@ -42,6 +42,18 @@ accepts a base URL, host, scheme, method, header, or body from a tool argument.
 `_request` re-checks two invariants as defence in depth: the verb is in
 `{"PUT", "DELETE"}`, and the URL starts with the resolved base.
 
+Redirects are never followed. The request is sent with `allow_redirects=False`,
+so a `301`/`302`/`303`/`307`/`308` is returned to this code rather than being
+re-issued by the HTTP session — `requests` would otherwise re-send a `307`/`308`
+with the method and body intact to whatever host the `Location` header names.
+Any `3xx` is a refusal (`unexpected_redirect`), never a success; a non-empty
+`response.history` is also refused, since it means hops already happened.
+
+Upstream error text and the `Retry-After` header are untrusted. The message is
+bounded (4096 chars, marked when truncated); `Retry-After` is accepted only in
+the two forms RFC 9110 defines (delta-seconds or an HTTP-date) and dropped
+otherwise, so nothing attacker-shaped reaches the envelope.
+
 ## Validation order (a security property)
 
 ```
@@ -63,8 +75,15 @@ caller could use the error code to probe allowlist membership.
 |---|---|---|
 | 400/401/403/404/409/429 | `bad_request` / `unauthorized` / `not_found` / `rate_limited` | not flagged |
 | 5xx | `upstream_error` | `true` |
+| 3xx (redirect, not followed) | `unexpected_redirect` | `false` |
 | connect timeout (never sent) | `network_error` | `false` |
 | read timeout / reset / post-connect TLS failure | `ambiguous_outcome` | `unknown` |
+| credential unavailable | `not_configured` | not flagged |
+
+A credential failure is a `not_configured` error, not `upstream_error`: the
+message names the variable to set (`GSC_WRITE_SERVICE_ACCOUNT_FILE`,
+`GOOGLE_APPLICATION_CREDENTIALS`, or `GSC_WRITE_TEST_STATIC_TOKEN`) and is
+redacted like every other message.
 
 No case is retried. A mutation whose delivery is unknown must be reconciled by
 the caller against the property's actual state; re-sending it is how duplicate
@@ -75,6 +94,13 @@ or inverted effects are produced. Deleting an already-deleted sitemap returns
 
 The HTTP transport requires a shared bearer token; stdio is authorised by the
 spawning process. Both authenticate *access to this endpoint*.
+
+The loopback test override (`GSC_WRITE_API_BASE_OVERRIDE`) changes *which*
+credential may be used, not just where requests go: when the base resolves to a
+loopback host, the session builder accepts only the explicit test token
+(`GSC_WRITE_TEST_STATIC_TOKEN`) and refuses otherwise. It never falls back to a
+service-account file or ADC, so a test base cannot cause a real write credential
+to be loaded or presented.
 
 The server does not implement, and does not claim, per-operation approval. The
 LiteLLM gateway is where a caller is authorised, where policy lives, and where a

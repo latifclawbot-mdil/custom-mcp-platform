@@ -32,6 +32,7 @@ import threading
 from typing import Any, Optional
 
 from . import client
+from .errors import CredentialError
 
 logger = logging.getLogger("search_console_writer.auth")
 
@@ -50,19 +51,16 @@ _lock = threading.Lock()
 _session: Optional[Any] = None
 
 
-class CredentialError(RuntimeError):
-    """Raised when a usable write credential cannot be obtained.
-
-    Messages are deliberately generic for ADC failures: provider error strings
-    can embed service-account file paths and principal addresses.
-    """
-
-
 def _loopback_override_active() -> bool:
     return client.resolve_base() != client.BASE_URL
 
 
 def _build_static_session(token: str) -> Any:
+    if not token.strip():
+        raise CredentialError(
+            f"{STATIC_TOKEN_ENV} is set but empty; a loopback test credential "
+            f"must be a non-empty token"
+        )
     try:
         import requests
     except ImportError as exc:  # pragma: no cover - environment dependent
@@ -139,9 +137,25 @@ def _wrap(credentials: Any) -> Any:
 
 
 def build_session() -> Any:
-    """Build the write session. Called lazily, on the first valid call."""
+    """Build the write session. Called lazily, on the first valid call.
+
+    When the API base has been overridden to a loopback host (the test seam),
+    the static test token is the *only* credential this function will use. It
+    will not fall back to a real service-account file or ambient ADC: a test
+    override pointing at a fake upstream must never cause an operator's real
+    write credential to be loaded or presented. With no test token the call
+    fails closed instead of silently authenticating with a production
+    credential.
+    """
     static_token = os.environ.get(STATIC_TOKEN_ENV)
-    if static_token and _loopback_override_active():
+    if _loopback_override_active():
+        if not static_token:
+            raise CredentialError(
+                "the API base has been overridden to a loopback host, but no "
+                f"test credential is configured; set {STATIC_TOKEN_ENV} to a "
+                "non-empty test token. A loopback override never falls back to "
+                f"{SERVICE_ACCOUNT_ENV} or Application Default Credentials"
+            )
         return _build_static_session(static_token)
 
     sa_path = os.environ.get(SERVICE_ACCOUNT_ENV)

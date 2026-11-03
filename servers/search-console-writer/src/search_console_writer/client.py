@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
@@ -64,7 +65,68 @@ REQUEST_TIMEOUT_SECONDS = 30.0
 #: The only HTTP verbs this package can emit.
 ALLOWED_WRITE_METHODS: frozenset[str] = frozenset({"PUT", "DELETE"})
 
+#: Hard cap on the length of untrusted upstream text (an error message) carried
+#: into the envelope.
+MAX_ERROR_MESSAGE_LEN = 4096
+
+#: Hard cap on the length of a reflected ``Retry-After`` value. A well-formed
+#: value is a small integer or an HTTP-date, never thousands of bytes.
+MAX_RETRY_AFTER_LEN = 512
+
+_RETRY_AFTER_SECONDS_RE = re.compile(r"[0-9]{1,9}")
+
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _bounded(value: Any, limit: int) -> str:
+    """Coerce ``value`` to ``str`` and truncate it to ``limit`` characters.
+
+    Upstream error text and headers are untrusted: a server (or a MITM on a
+    compromised route) can return an arbitrarily large string, and an unbounded
+    reflection puts that whole string into the calling model's context. The
+    truncation is marked so a truncated value is not mistaken for the whole.
+    """
+    try:
+        text = value if isinstance(value, str) else str(value)
+    except Exception:  # pragma: no cover - objects with a broken __str__
+        return ""
+    if len(text) <= limit:
+        return text
+    marker = "...[truncated]"
+    if limit <= len(marker):
+        return text[:limit]
+    return text[: limit - len(marker)] + marker
+
+
+def _sanitise_retry_after(raw: Any) -> str | None:
+    """Return a well-formed ``Retry-After`` value, or ``None``.
+
+    The header is untrusted. Rather than reflect it bounded, it is accepted
+    only in the two forms RFC 9110 defines — delta-seconds (a short run of
+    ASCII digits) or an HTTP-date — and dropped otherwise. Dropping garbage is
+    stronger than truncating it: nothing attacker-chosen reaches the envelope.
+    """
+    if raw is None:
+        return None
+    try:
+        text = raw if isinstance(raw, str) else str(raw)
+    except Exception:  # pragma: no cover - objects with a broken __str__
+        return None
+    text = text.strip()
+    if not text or len(text) > MAX_RETRY_AFTER_LEN:
+        return None
+    # Reject control characters and any non-ASCII byte before parsing.
+    if any(ord(ch) < 0x20 or ord(ch) > 0x7E for ch in text):
+        return None
+    if _RETRY_AFTER_SECONDS_RE.fullmatch(text):
+        return text
+    try:
+        from email.utils import parsedate_to_datetime
+
+        parsedate_to_datetime(text)
+    except (TypeError, ValueError, IndexError):
+        return None
+    return text
 
 
 def _is_loopback_base(raw: str) -> bool:
@@ -104,6 +166,8 @@ def _error_from_response(response: Any, *, may_have_applied: bool) -> GscError:
                 message = err
     except Exception:
         message = ""
+    # Untrusted upstream text is bounded before it can enter the envelope.
+    message = _bounded(message, MAX_ERROR_MESSAGE_LEN)
 
     details: dict[str, Any] = {}
     if may_have_applied and status >= 500:
@@ -113,8 +177,9 @@ def _error_from_response(response: Any, *, may_have_applied: bool) -> GscError:
         retry_after = headers.get("Retry-After")
     except Exception:
         retry_after = None
-    if retry_after:
-        details["retry_after"] = str(retry_after)
+    retry_after = _sanitise_retry_after(retry_after)
+    if retry_after is not None:
+        details["retry_after"] = retry_after
 
     if status == 400:
         return GscError("bad_request", message or "the request was rejected", details)
@@ -198,13 +263,55 @@ class GscWriteClient:
         # base is loopback.
         record(method, url)
         try:
-            response = self._session.request(method, url, timeout=self._timeout)
+            # Redirects are never followed. ``requests`` defaults to
+            # ``allow_redirects=True`` and re-sends a 307/308 — method and body
+            # intact — to whatever host the ``Location`` names. On a mutating
+            # verb that hands the write to an arbitrary third party. Whatever
+            # the status, exactly one request leaves this process.
+            response = self._session.request(
+                method, url, timeout=self._timeout, allow_redirects=False
+            )
         except Exception as exc:
             raise _transport_error(exc) from None
 
         status = getattr(response, "status_code", None)
         if not isinstance(status, int):
             raise GscError("invalid_response", "the transport returned no status code")
+
+        # Defence in depth: a session that ignored ``allow_redirects=False`` (or
+        # a custom transport) still exposes any hops it took in ``history``. A
+        # non-empty history means the mutation may already have been re-sent.
+        history = getattr(response, "history", None) or ()
+        try:
+            hops = len(history)
+        except Exception:  # pragma: no cover - exotic history object
+            hops = 0
+        if hops:
+            raise GscError(
+                "unexpected_redirect",
+                "the upstream answered with a redirect and the request was "
+                "re-issued; the write may have been sent more than once and to "
+                "more than one host",
+                {
+                    "may_have_applied": "unknown",
+                    "redirects_followed": "true",
+                    "hops": str(hops),
+                },
+            )
+
+        # A 3xx is a refusal to perform the write here, not a success. Treating
+        # it as success would report "applied" for a mutation that never ran.
+        if 300 <= status < 400:
+            raise GscError(
+                "unexpected_redirect",
+                "the upstream answered with a redirect; a write is never "
+                "re-sent to the redirect target. The mutation was not applied",
+                {
+                    "may_have_applied": "false",
+                    "redirects_followed": "false",
+                    "status": str(status),
+                },
+            )
         if status >= 400:
             raise _error_from_response(response, may_have_applied=True)
         # All four methods answer with an empty body on success. A body is

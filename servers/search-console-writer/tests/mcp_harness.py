@@ -45,11 +45,20 @@ class RecordedRequest:
 
 
 class FakeWriteUpstream:
-    """A tiny HTTP server standing in for Google's webmasters v3 write API."""
+    """A tiny HTTP server standing in for Google's webmasters v3 write API.
+
+    ``status`` selects the response status; ``redirect_location`` is sent as
+    ``Location`` (so a test can prove a redirect is *not* followed), and
+    ``extra_headers`` lets a test put a hostile or over-long header on the
+    response.
+    """
 
     def __init__(self) -> None:
         self.requests: list[RecordedRequest] = []
         self.status = 200
+        self.error_message = "denied"
+        self.redirect_location: str | None = None
+        self.extra_headers: dict[str, str] = {}
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -75,6 +84,10 @@ class FakeWriteUpstream:
                 self.send_response(outer.status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
+                if outer.redirect_location is not None:
+                    self.send_header("Location", outer.redirect_location)
+                for name, value in outer.extra_headers.items():
+                    self.send_header(name, value)
                 self.end_headers()
                 if payload:
                     self.wfile.write(payload)
@@ -84,7 +97,6 @@ class FakeWriteUpstream:
             do_PUT = _handle
             do_DELETE = _handle
 
-        self.error_message = "denied"
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self.port = self._server.server_address[1]
