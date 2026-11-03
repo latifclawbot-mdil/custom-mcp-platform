@@ -14,17 +14,28 @@ Four sets matter:
 
 ``FINANCIAL_METHODS``
     Method ids that move money, set price/tax, revoke or alter a paid
-    entitlement, delete or deactivate a revenue-bearing product, or grant a
-    permission that reaches any of those. None is in the allowlist. The set is
-    explicit so the boundary is testable (allowlist ∩ financial = ∅) rather
-    than an argument in a document.
+    entitlement, delete or deactivate a revenue-bearing product, record or
+    reverse an externally-settled payment, or grant a permission that reaches
+    any of those. None is in the allowlist. The set is explicit so the boundary
+    is testable (allowlist ∩ financial = ∅) rather than an argument in a
+    document, and it is the single place the financial boundary is stated — a
+    financial method is never also listed as "excluded".
 
 ``EXCLUDED_METHODS``
     Non-financial methods that are nonetheless out of scope, each with a reason:
     signing, recovery campaigns, expansion files, internal app sharing, the
-    third-party store-review surface, system APK variants, and the redundant
-    track create/patch duplicates. These are named individually rather than
-    waved away as "not implemented".
+    third-party store-review surface, system APK variants, the redundant track
+    patch verb, and ``edits.commit`` (disabled: see ``DISABLED_METHODS``). These
+    are named individually rather than waved away as "not implemented".
+
+``DISABLED_METHODS``
+    Non-financial methods this server deliberately refuses even though the API
+    and the account may permit them, because they cannot be made safe under the
+    financial exclusion. Currently only ``edits.commit``: the API exposes no
+    endpoint that lists what is staged in an edit, and an edit id is a shared
+    handle, so the absence of a financial change staged by another actor cannot
+    be established. ``is_disabled`` is the runtime check; the client refuses the
+    method id outright.
 
 ``READ_BACK_METHODS``
     Verification GETs. They can never be turned into a mutation: the client
@@ -40,11 +51,14 @@ __all__ = [
     "FINANCIAL_METHODS",
     "EXCLUDED_METHODS",
     "EXCLUSION_NOTES",
+    "DISABLED_METHODS",
+    "DISABLED_REASONS",
     "READ_BACK_METHODS",
     "RELEASE_GATE_METHODS",
     "ARTIFACT_UPLOAD_METHODS",
     "is_allowed",
     "is_financial",
+    "is_disabled",
     "exclusion_reason",
 ]
 
@@ -82,10 +96,16 @@ ALLOWED_WRITE_METHODS: frozenset[str] = frozenset({
     # gate is separate and default-off)
     "edits.bundles.upload",
     "edits.apks.upload",
-    # Releases. Both are behind the release gate (default off) and accept only
-    # an edit id this server opened. See ``RELEASE_GATE_METHODS``.
+    # Releases. All behind the release gate (default off) and accepting only an
+    # edit id this server opened. See ``RELEASE_GATE_METHODS``.
+    #   * tracks.update replaces a track's release list (PUT .../tracks/{track});
+    #   * tracks.create creates a NEW closed-testing track (POST .../tracks),
+    #     which tracks.update cannot do because its track id is a path parameter.
+    #     It is the only API path that can create a track, so a release manager
+    #     who cannot call it cannot open a closed test through the API at all.
+    # commit is NOT here: it is disabled (see DISABLED_METHODS).
     "edits.tracks.update",
-    "edits.commit",
+    "edits.tracks.create",
 })
 
 #: Methods that make a change visible to users (or that stage the release list
@@ -93,7 +113,7 @@ ALLOWED_WRITE_METHODS: frozenset[str] = frozenset({
 #: server opened.
 RELEASE_GATE_METHODS: frozenset[str] = frozenset({
     "edits.tracks.update",
-    "edits.commit",
+    "edits.tracks.create",
 })
 
 #: Binary upload methods, behind ``PLAY_WRITER_ENABLE_ARTIFACT_UPLOAD``.
@@ -112,6 +132,11 @@ FINANCIAL_METHODS: frozenset[str] = frozenset({
     "orders.refund",
     "orders.reviewrefund",
     "externaltransactions.refundexternaltransaction",
+    # Records an externally-settled payment. The ExternalTransaction body
+    # carries originalPreTaxAmount, originalTaxAmount, currentPreTaxAmount,
+    # currentTaxAmount and userTaxAddress — money metadata, so it is financial
+    # bookkeeping and belongs here, not in the non-financial exclusion list.
+    "externaltransactions.createexternaltransaction",
     # Price and tax setters
     "inappproducts.insert",
     "inappproducts.update",
@@ -178,19 +203,23 @@ FINANCIAL_METHODS: frozenset[str] = frozenset({
 # Excluded non-financial methods, each with the reason it is out of scope.
 # ---------------------------------------------------------------------------
 EXCLUDED_METHODS: frozenset[str] = frozenset({
-    # Redundant duplicates of edits.tracks.update (the create-or-replace call
-    # this server implements). Excluded so there is exactly one release path.
-    "edits.tracks.create",
+    # Redundant duplicate of edits.tracks.update: same path, same Track body,
+    # same effect. Excluded so there is exactly one release-list write path.
+    # (tracks.create is NOT excluded — it is the only way to create a track.)
     "edits.tracks.patch",
-    # Financial bookkeeping: records an externally-settled payment.
-    "externaltransactions.createexternaltransaction",
+    # Disabled, not merely excluded: see DISABLED_METHODS.
+    "edits.commit",
     # Signing: changes the key that authenticates the shipped app.
     "appsigning.enrollApp",
     "appsigning.rotateAppSigningKey",
-    # Artifact channel with no gate beyond the API scope.
+    # Internal app-sharing artifacts. Gated by the Play Console permission
+    # "Release apps to testing tracks" (which cannot publish to production) and
+    # unreachable for a service account without it; excluded on channel-scope
+    # grounds, not because it is ungated.
     "internalappsharingartifacts.uploadapk",
     "internalappsharingartifacts.uploadbundle",
-    # Expansion files / externally-hosted apk: fork the shipped artifact set.
+    # Legacy artifact routes. Expansion files (OBB) supplement the APK rather
+    # than replacing it, and Play Asset Delivery supersedes them for >200 MB.
     "edits.apks.addexternallyhosted",
     "edits.expansionfiles.upload",
     "edits.expansionfiles.update",
@@ -218,28 +247,48 @@ EXCLUDED_METHODS: frozenset[str] = frozenset({
 #: Human-readable reason per excluded method. Used by documentation and by the
 #: ``play_describe_capability`` tool.
 EXCLUSION_NOTES: Mapping[str, str] = {
-    "edits.tracks.create": (
-        "Redundant with edits.tracks.update, which creates or replaces a track's "
-        "release list; one release path is easier to audit."
-    ),
     "edits.tracks.patch": (
-        "Redundant with edits.tracks.update; one release path is easier to audit."
+        "PATCH to the same path as edits.tracks.update with the same Track "
+        "body; Google documents no behavioural difference beyond the verb, so "
+        "it is redundant. One release-list write path is easier to audit."
     ),
-    "externaltransactions.createexternaltransaction": (
-        "Financial bookkeeping: records an externally-settled payment amount."
+    "edits.commit": (
+        "Disabled: pending publishes cannot be proven free of financial "
+        "changes. The Android Publisher API exposes no endpoint that lists "
+        "what is staged in an edit, and an edit id is a shared handle, so a "
+        "commit could apply a price or entitlement change staged by another "
+        "actor that this server cannot see. With the financial exclusion in "
+        "force the only fail-closed choice is to expose no commit at all."
     ),
     "appsigning.enrollApp": "Changes the key that authenticates the shipped app.",
     "appsigning.rotateAppSigningKey": "Changes the app signing key.",
     "internalappsharingartifacts.uploadapk": (
-        "Artifact channel with no gate beyond the API scope."
+        "Internal-only artifact channel, gated by the Play Console permission "
+        '"Release apps to testing tracks" (which cannot publish to production). '
+        "Excluded on channel-scope grounds; it is the lowest-risk write surface "
+        "in the API, not an ungated one."
     ),
     "internalappsharingartifacts.uploadbundle": (
-        "Artifact channel with no gate beyond the API scope."
+        "Internal-only artifact channel, gated by the Play Console permission "
+        '"Release apps to testing tracks" (which cannot publish to production). '
+        "Excluded on channel-scope grounds; it is the lowest-risk write surface "
+        "in the API, not an ungated one."
     ),
-    "edits.apks.addexternallyhosted": "Forks the shipped artifact set.",
-    "edits.expansionfiles.upload": "Forks the shipped artifact set.",
-    "edits.expansionfiles.update": "Forks the shipped artifact set.",
-    "edits.expansionfiles.patch": "Forks the shipped artifact set.",
+    "edits.apks.addexternallyhosted": (
+        "Legacy route for a self-hosted APK; only available to Managed Play "
+        "organizations configured to restrict distribution. Superseded by App "
+        "Bundle + Play Asset Delivery."
+    ),
+    "edits.expansionfiles.upload": (
+        "Legacy OBB route. Expansion files supplement the APK; they are "
+        "superseded by App Bundle + Play Asset Delivery for >200 MB."
+    ),
+    "edits.expansionfiles.update": (
+        "Legacy OBB route, superseded by App Bundle + Play Asset Delivery."
+    ),
+    "edits.expansionfiles.patch": (
+        "Legacy OBB route, superseded by App Bundle + Play Asset Delivery."
+    ),
     "apprecovery.create": "Remediation campaign; can lead to a production push.",
     "apprecovery.deploy": "Can push a remediation release to production.",
     "apprecovery.addTargeting": "Remediation campaign targeting.",
@@ -284,6 +333,33 @@ READ_BACK_METHODS: frozenset[str] = frozenset({
     "applications.deviceTierConfigs.list",
 })
 
+# ---------------------------------------------------------------------------
+# Disabled methods: named individually, refused with a reason, unreachable.
+# ---------------------------------------------------------------------------
+#: Non-financial methods this server deliberately refuses even though the API
+#: and the account may permit them. Each is also in :data:`EXCLUDED_METHODS` so
+#: the "every write is in exactly one bucket" invariant still holds, but unlike
+#: a scope exclusion the *reason* here is a safety property, not a design choice.
+#:
+#: ``edits.commit`` is the only member. It cannot be made fail-closed under the
+#: financial exclusion: committing an edit applies everything staged into it,
+#: the API has no "list what is staged" endpoint, and an edit id is a shared
+#: handle, so this server cannot establish that a financial change staged by
+#: another actor is absent.
+DISABLED_METHODS: frozenset[str] = frozenset({"edits.commit"})
+
+#: Human-readable reason per disabled method, used by the capability report.
+DISABLED_REASONS: Mapping[str, str] = {
+    "edits.commit": (
+        "Disabled under the financial exclusion: the Android Publisher API "
+        "exposes no endpoint that lists what is staged in an edit, and an edit "
+        "id is a shared handle, so a commit could apply a financial change "
+        "(a price, tax, base plan or offer) staged by another actor that this "
+        "server cannot see. The absence of a financial side effect cannot be "
+        "established, so no commit is exposed."
+    ),
+}
+
 
 def is_allowed(method_id: str) -> bool:
     """True if ``method_id`` is an implemented write for this server."""
@@ -293,6 +369,11 @@ def is_allowed(method_id: str) -> bool:
 def is_financial(method_id: str) -> bool:
     """True if ``method_id`` is classified financial (never reachable)."""
     return method_id in FINANCIAL_METHODS
+
+
+def is_disabled(method_id: str) -> bool:
+    """True if ``method_id`` is deliberately refused even though non-financial."""
+    return method_id in DISABLED_METHODS
 
 
 def exclusion_reason(method_id: str) -> str:

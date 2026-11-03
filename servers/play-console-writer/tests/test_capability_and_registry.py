@@ -99,16 +99,18 @@ def test_risk_note_mentions_the_shared_handle_hazard():
     assert "no endpoint" in note.lower()
 
 
-def test_registry_is_bounded():
+def test_registry_is_bounded_and_refuses_to_drop_a_live_edit():
     from play_console_writer.edit_registry import MAX_TRACKED_EDITS
 
     registry = EditRegistry(clock=_Clock())
-    for index in range(MAX_TRACKED_EDITS + 10):
+    for index in range(MAX_TRACKED_EDITS):
         registry.open_edit("com.example.app", f"e{index}")
-    # Oldest were evicted; the most recent are still present.
-    registry.require_owned("com.example.app", f"e{MAX_TRACKED_EDITS + 9}")
-    with pytest.raises(LocalError):
-        registry.require_owned("com.example.app", "e0")
+
+    # At capacity a new edit is refused rather than evicting one that may still
+    # be mid-workflow: losing ownership silently would be the unsafe direction.
+    with pytest.raises(LocalError, match="maximum"):
+        registry.open_edit("com.example.app", "overflow")
+    registry.require_owned("com.example.app", "e0")
 
 
 class _Clock:

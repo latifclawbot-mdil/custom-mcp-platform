@@ -44,6 +44,8 @@ class FakeUpstream:
     def __init__(self) -> None:
         self.requests: list[RecordedRequest] = []
         self.responses: dict[str, tuple[int, dict]] = {}
+        #: path-substring -> (status, payload) applied to GET reads only.
+        self.read_responses: dict[str, tuple[int, dict]] = {}
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -81,6 +83,10 @@ class FakeUpstream:
         self.port = self._server.server_address[1]
 
     def _route(self, method: str, path: str) -> tuple[int, dict]:
+        if method == "GET":
+            for needle, response in self.read_responses.items():
+                if needle in path:
+                    return response
         for needle, response in self.responses.items():
             if needle in path:
                 return response

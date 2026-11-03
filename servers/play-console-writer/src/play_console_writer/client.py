@@ -31,7 +31,7 @@ import httpx
 
 from .auth import CredentialConfig
 from .errors import LocalError, PolicyError, UpstreamError, WriteOutcomeUnknown, redact_upstream_error
-from .policy import ALLOWED_WRITE_METHODS, READ_BACK_METHODS
+from .policy import ALLOWED_WRITE_METHODS, DISABLED_METHODS, READ_BACK_METHODS
 from .settings import Settings
 
 __all__ = ["GoogleWriteClient", "MethodSpec", "METHOD_SPECS", "API_ROOT", "PATH_ROOT"]
@@ -56,6 +56,11 @@ class MethodSpec:
     ``kind`` is ``"read"``, ``"write"`` or ``"media"``. Only ``"write"`` and
     ``"media"`` entries appear in :data:`ALLOWED_WRITE_METHODS`; a ``"read"``
     entry is a verification GET and can never be turned into a mutation.
+
+    ``query_params`` is the complete set of query parameters the method accepts.
+    Anything else is a policy error (see :meth:`GoogleWriteClient.request`), so
+    a caller cannot smuggle an upstream option such as
+    ``changesNotSentForReview`` into a request.
     """
 
     method_id: str
@@ -63,10 +68,12 @@ class MethodSpec:
     path_template: str
     kind: str
     idempotent: bool
+    query_params: frozenset[str] = frozenset()
 
 
-def _spec(method_id: str, verb: str, path: str, kind: str, idempotent: bool) -> MethodSpec:
-    return MethodSpec(method_id, verb, path, kind, idempotent)
+def _spec(method_id: str, verb: str, path: str, kind: str, idempotent: bool,
+          query_params: frozenset[str] = frozenset()) -> MethodSpec:
+    return MethodSpec(method_id, verb, path, kind, idempotent, query_params)
 
 
 #: Frozen registry. Every entry is a real Android Publisher v3 method whose
@@ -120,7 +127,8 @@ METHOD_SPECS: Mapping[str, MethodSpec] = {
         "applications/{packageName}/dataSafety", "write", False),
     "applications.deviceTierConfigs.create": _spec(
         "applications.deviceTierConfigs.create", "POST",
-        "applications/{packageName}/deviceTierConfigs", "write", False),
+        "applications/{packageName}/deviceTierConfigs", "write", False,
+        query_params=frozenset({"allowUnknownDevices"})),
     # -- testers --------------------------------------------------------------
     "edits.testers.update": _spec(
         "edits.testers.update", "PUT",
@@ -144,9 +152,14 @@ METHOD_SPECS: Mapping[str, MethodSpec] = {
     "edits.tracks.update": _spec(
         "edits.tracks.update", "PUT",
         "applications/{packageName}/edits/{editId}/tracks/{track}", "write", True),
-    "edits.commit": _spec(
-        "edits.commit", "POST",
-        "applications/{packageName}/edits/{editId}:commit", "write", False),
+    # Create a NEW track (TrackConfig body, no {track} path segment). The only
+    # API path that can open a closed-testing track; tracks.update cannot,
+    # because its track id is a path parameter and the track must already exist.
+    "edits.tracks.create": _spec(
+        "edits.tracks.create", "POST",
+        "applications/{packageName}/edits/{editId}/tracks", "write", False),
+    # NOTE: edits.commit has no spec on purpose. It is in policy.DISABLED_METHODS
+    # and must stay unreachable even by method id.
     # -- reviews --------------------------------------------------------------
     "reviews.reply": _spec(
         "reviews.reply", "POST",
@@ -292,6 +305,13 @@ class GoogleWriteClient:
         """
         spec = METHOD_SPECS.get(method_id)
         if spec is None:
+            if method_id in DISABLED_METHODS:
+                raise PolicyError(
+                    f"method {method_id!r} is disabled under this server's "
+                    "financial exclusion and will not be sent: the request "
+                    "could apply a financial change this server cannot account "
+                    "for. This server has no generic request capability."
+                )
             raise PolicyError(
                 f"method {method_id!r} is not implemented by this server and will "
                 "not be sent. This server has no generic request capability."
@@ -304,11 +324,20 @@ class GoogleWriteClient:
         params = dict(params or {})
         path = self._render_path(spec.path_template, params)
 
-        query = {
-            key: _stringify(value)
-            for key, value in params.items()
-            if value is not None and value != ""
-        }
+        # Everything left after placeholder substitution is a query parameter.
+        # Only the ones the method actually declares may be sent: an undeclared
+        # key (e.g. changesNotSentForReview) is a policy error, so a caller
+        # cannot alter upstream behaviour through an option this server never
+        # documented. ``uploadType`` is set by this server for media, not by the
+        # caller, and is therefore not a caller-supplied query parameter.
+        caller_query = {k: v for k, v in params.items() if v is not None and v != ""}
+        undeclared = set(caller_query) - set(spec.query_params)
+        if undeclared:
+            raise PolicyError(
+                f"{method_id!r} does not accept query parameter(s) "
+                f"{sorted(undeclared)}; allowed: {sorted(spec.query_params) or 'none'}"
+            )
+        query = {key: _stringify(value) for key, value in caller_query.items()}
         if spec.kind == "media":
             query["uploadType"] = "media"
 

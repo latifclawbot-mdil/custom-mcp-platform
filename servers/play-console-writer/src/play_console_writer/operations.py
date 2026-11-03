@@ -19,7 +19,7 @@ allowlist.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 from .client import GoogleWriteClient
 from .edit_registry import EditRegistry
@@ -48,6 +48,11 @@ _TRACKS = frozenset({
 
 #: TrackRelease.status enum, exactly as published in the discovery document.
 _RELEASE_STATUSES = frozenset({"draft", "inProgress", "halted", "completed"})
+
+#: TrackConfig.formFactor enum. ``DEFAULT`` is the phone/tablet track; the other
+#: two are the wear and automotive variants, matched by the ``wear:`` /
+#: ``automotive:`` prefixes in ``_TRACKS``.
+_FORM_FACTORS = frozenset({"DEFAULT", "WEAR", "AUTOMOTIVE"})
 
 _LISTING_TEXT_MAX = 4000
 _SHORT_DESC_MAX = 80
@@ -97,10 +102,102 @@ class WriteOperations:
     def _base(self, package: str) -> dict[str, Any]:
         return {"package_name": package}
 
+    # -- read-back verification -------------------------------------------
+
+    def _read_back(self, method_id: str, *, params: dict[str, Any]) -> tuple[Any, str | None]:
+        """Attempt a verification GET; return ``(value, error_reason)``.
+
+        A failed read-back is **not** an operation failure: the mutation was
+        already sent and may have been applied. Returning the error here lets
+        the caller report ``applied_unverified`` instead of raising, so a client
+        does not read a tool error and re-issue a write that already happened.
+        """
+        try:
+            return self._client.request(method_id, params=params), None
+        except Exception as exc:  # noqa: BLE001 - verification is best-effort
+            return None, str(exc)
+
+    @staticmethod
+    def _verification(observed: Any, *, error: str | None,
+                      expected: Mapping[str, Any] | None = None,
+                      container: str | None = None) -> tuple[dict[str, Any], bool]:
+        """Build the ``verification`` block and report whether it verified.
+
+        ``verified`` means the read-back ran *and* the observed resource matches
+        what was written. ``matches_intent`` is only meaningful when a read-back
+        was obtained; an error or a mismatch both leave the write applied but
+        unproven, which is exactly the state a caller must not retry blindly.
+        """
+        if error is not None:
+            return ({
+                "verified": False,
+                "matches_intent": None,
+                "reason": "read_back_failed",
+                "error": error,
+                "guidance": (
+                    "The write was sent and may have been applied, but the "
+                    "read-back failed, so it is unverified. Do NOT blindly "
+                    "re-issue this write — it may duplicate the change. Read the "
+                    "resource (or open a new edit and inspect) before retrying."
+                ),
+            }, False)
+
+        if expected:
+            mismatches = _mismatches(observed, expected, container)
+            if mismatches:
+                return ({
+                    "verified": False,
+                    "matches_intent": False,
+                    "reason": "read_back_differs",
+                    "mismatches": mismatches,
+                    "guidance": (
+                        "The read-back succeeded but does not show the value "
+                        "that was written. Do NOT re-issue this write; inspect "
+                        "the resource and reconcile before acting again."
+                    ),
+                }, False)
+
+        return ({
+            "verified": True,
+            "matches_intent": True,
+        }, True)
+
+    def _verified_result(self, package: str, *, base: dict[str, Any],
+                         observed: Any, error: str | None,
+                         resource_key: str | None = None,
+                         expected: Mapping[str, Any] | None = None,
+                         container: str | None = None,
+                         extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Assemble an operation result carrying the F2 outcome contract."""
+        verification, verified = self._verification(
+            observed, error=error, expected=expected, container=container)
+        result: dict[str, Any] = {
+            **self._base(package),
+            **base,
+            "outcome": "applied" if verified else "applied_unverified",
+            "verification": verification,
+        }
+        if resource_key is not None:
+            result["read_back"] = {resource_key: observed}
+        if extra:
+            result.update(extra)
+        return result
+
     # -- 1. edit session plumbing -----------------------------------------
 
     def edit_insert(self, package_name: str) -> dict[str, Any]:
         pkg = self._pkg(package_name)
+        # Google permits one active edit per app; a second edits.insert discards
+        # the first. Refuse before the request so staged work is never lost
+        # silently (the registry already owns a live edit for this package).
+        live = self._edits.live_edit_for(pkg)
+        if live is not None:
+            raise LocalError(
+                f"package {pkg!r} already has a live edit ({live!r}) that is "
+                "already tracked by this server. Opening another would discard "
+                "it and every change staged into it. Reuse that edit id, or "
+                "discard it with play_edit_delete first."
+            )
         data = self._client.request("edits.insert", params={"packageName": pkg}, body={})
         edit_id = str((data or {}).get("id") or "")
         if not edit_id:
@@ -113,9 +210,9 @@ class WriteOperations:
             "expires_in_seconds": track.seconds_remaining(_now()),
             "note": (
                 "Staged changes are discarded by Google if this edit is never "
-                "committed. Publishing requires play_edit_commit, which is behind "
-                "the release gate (default off). Treat this edit id as private: "
-                "anyone holding it can stage into or commit it."
+                "applied. This server exposes no commit, so nothing staged here "
+                "is published through it. Treat this edit id as private: anyone "
+                "holding it can stage into or commit it."
             ),
             "read_back": {"edit": data},
         }
@@ -182,14 +279,16 @@ class WriteOperations:
             body=body,
         )
         self._staged(pkg, edit, method_id, data)
-        read_back = self._client.request(
+        observed, error = self._read_back(
             "edits.listings.get",
             params={"packageName": pkg, "editId": edit, "language": lang},
         )
-        return {
-            **self._base(pkg), "edit_id": edit, "language": lang,
-            "result": data, "read_back": {"listing": read_back},
-        }
+        return self._verified_result(
+            pkg,
+            base={"edit_id": edit, "language": lang, "result": data},
+            observed=observed, error=error, resource_key="listing",
+            expected=body,
+        )
 
     def listing_delete(self, package_name: str, edit_id: str,
                        language: str) -> dict[str, Any]:
@@ -275,13 +374,14 @@ class WriteOperations:
             method_id, params={"packageName": pkg, "editId": edit}, body=body
         )
         self._staged(pkg, edit, method_id, data)
-        read_back = self._client.request(
-            "edits.details.get", params={"packageName": pkg, "editId": edit}
+        observed, error = self._read_back(
+            "edits.details.get", params={"packageName": pkg, "editId": edit})
+        return self._verified_result(
+            pkg,
+            base={"edit_id": edit, "result": data},
+            observed=observed, error=error, resource_key="details",
+            expected=body,
         )
-        return {
-            **self._base(pkg), "edit_id": edit, "result": data,
-            "read_back": {"details": read_back},
-        }
 
     # -- 4. testers --------------------------------------------------------
 
@@ -318,19 +418,22 @@ class WriteOperations:
             body=body,
         )
         self._staged(pkg, edit, method_id, data)
-        read_back = self._client.request(
+        observed, error = self._read_back(
             "edits.testers.get",
             params={"packageName": pkg, "editId": edit, "track": validated_track},
         )
-        return {
-            **self._base(pkg), "edit_id": edit, "track": validated_track,
-            "result": data,
-            "read_back": {"testers": read_back},
-            "api_limitation": (
-                "The Testers resource does not support individual email lists; "
-                "only Google Groups are managed through this API."
-            ),
-        }
+        return self._verified_result(
+            pkg,
+            base={"edit_id": edit, "track": validated_track, "result": data},
+            observed=observed, error=error, resource_key="testers",
+            expected=body,
+            extra={
+                "api_limitation": (
+                    "The Testers resource does not support individual email "
+                    "lists; only Google Groups are managed through this API."
+                ),
+            },
+        )
 
     # -- 5. declarations ---------------------------------------------------
 
@@ -374,16 +477,18 @@ class WriteOperations:
             "applications.deviceTierConfigs.create", params=params, body=config
         )
         config_id = (data or {}).get("deviceTierConfigId")
-        read_back: Any = data
+        observed: Any = data
+        error: str | None = None
         if config_id is not None:
-            read_back = self._client.request(
+            observed, error = self._read_back(
                 "applications.deviceTierConfigs.get",
                 params={"packageName": pkg, "deviceTierConfigId": str(config_id)},
             )
-        return {
-            **self._base(pkg), "result": data,
-            "read_back": {"device_tier_config": read_back},
-        }
+        return self._verified_result(
+            pkg,
+            base={"result": data},
+            observed=observed, error=error, resource_key="device_tier_config",
+        )
 
     # -- 6. reviews --------------------------------------------------------
 
@@ -498,16 +603,69 @@ class WriteOperations:
             body=body,
         )
         self._staged(pkg, edit, "edits.tracks.update", data)
-        read_back = self._safe_track(pkg, edit, validated_track)
-        return {
-            **self._base(pkg), "edit_id": edit, "track": validated_track,
-            "result": data,
-            "read_back": {"track": read_back},
-            "not_published": (
-                "Staged only. Publishing requires play_edit_commit, which is "
-                "separately gated."
-            ),
+        observed, error = self._read_back(
+            "edits.tracks.list", params={"packageName": pkg, "editId": edit})
+        return self._verified_result(
+            pkg,
+            base={"edit_id": edit, "track": validated_track, "result": data},
+            observed=observed, error=error, resource_key="track",
+            expected={"track": validated_track, "releases": [release]},
+            container="tracks",
+            extra={
+                "not_published": (
+                    "Staged only. This server exposes no commit: applying an "
+                    "edit cannot be proven free of financial changes staged by "
+                    "another actor (see play_describe_capability)."
+                ),
+            },
+        )
+
+    def track_create(self, package_name: str, edit_id: str, track: str,
+                     form_factor: str = "DEFAULT") -> dict[str, Any]:
+        """Create a NEW track inside an edit this server opened.
+
+        ``edits.tracks.create`` is the only API path that can create a track:
+        ``edits.tracks.update`` targets an existing track because its track id
+        is a path parameter, and ``edits.tracks.patch`` is the same path as
+        update. The body is a ``TrackConfig`` whose ``type`` is fixed to
+        ``CLOSED_TESTING`` (Google documents no other supported value) and whose
+        ``track`` field names the new track. Both enums are the whole safety
+        property, so there is deliberately no free-form passthrough.
+        """
+        pkg = self._pkg(package_name)
+        self._settings.require_release_gate_enabled("track_create")
+        _, edit = self._edit(pkg, edit_id)
+        validated_track = validate_enum(track, _TRACKS, "track")
+        validated_form_factor = validate_enum(
+            form_factor, _FORM_FACTORS, "form_factor")
+
+        body = {
+            "track": validated_track,
+            "type": "CLOSED_TESTING",
+            "formFactor": validated_form_factor,
         }
+        data = self._client.request(
+            "edits.tracks.create",
+            params={"packageName": pkg, "editId": edit},
+            body=body,
+        )
+        self._staged(pkg, edit, "edits.tracks.create", data)
+        # A create returns the new Track; confirm it with the list read-back.
+        observed, error = self._read_back(
+            "edits.tracks.list", params={"packageName": pkg, "editId": edit})
+        return self._verified_result(
+            pkg,
+            base={"edit_id": edit, "track": validated_track, "result": data},
+            observed=observed, error=error, resource_key="tracks",
+            expected={"track": validated_track},
+            container="tracks",
+            extra={
+                "not_published": (
+                    "A track definition was created in the edit. This server "
+                    "exposes no commit, so nothing is published."
+                ),
+            },
+        )
 
     def _safe_track(self, pkg: str, edit: str, track: str) -> Any:
         try:
@@ -516,53 +674,11 @@ class WriteOperations:
         except Exception as exc:  # noqa: BLE001 - verification is best-effort
             return {"verification_error": str(exc)}
 
-    def edit_commit(self, package_name: str, edit_id: str,
-                    confirm_edit_id: str) -> dict[str, Any]:
-        """Apply an edit. This is the publish gate, and it is deliberately awkward.
-
-        Three independent constraints, each of which refuses before any network
-        call:
-
-        1. the release gate must be enabled by configuration;
-        2. the edit id must have been opened by *this* server (so the server
-           never commits a session it did not create and cannot account for);
-        3. the caller must repeat the edit id in ``confirm_edit_id``.
-
-        The pre-commit validation call is a real gate too: if Google reports the
-        staged edit as invalid, nothing is applied.
-        """
-        pkg = self._pkg(package_name)
-        self._settings.require_release_gate_enabled("edit_commit")
-        _, edit = self._edit(pkg, edit_id)
-
-        if not isinstance(confirm_edit_id, str) or confirm_edit_id != edit:
-            raise ValidationError(
-                "confirm_edit_id must repeat the edit id exactly; this is the "
-                "deliberate confirmation step for applying an edit"
-            )
-
-        validation = self._client.request(
-            "edits.validate", params={"packageName": pkg, "editId": edit},
-            verification=True,
-        )
-        errors = _validation_errors(validation)
-        if errors:
-            raise LocalError(
-                "the edit does not validate, so it was not committed: "
-                + "; ".join(errors)
-            )
-
-        data = self._client.request(
-            "edits.commit", params={"packageName": pkg, "editId": edit}, body={}
-        )
-        staged = self._edits.staged_methods(pkg, edit)
-        self._edits.mark_committed(pkg, edit)
-        return {
-            **self._base(pkg), "edit_id": edit, "committed": True,
-            "result": data,
-            "staged_by_this_server": staged,
-            "residual_risk": self._edits.risk_note(pkg, edit),
-        }
+    # NOTE: there is deliberately no edit_commit operation. Committing an edit
+    # applies everything staged into it, the API cannot enumerate an edit's
+    # contents, and an edit id is a shared handle, so the absence of a financial
+    # change staged by another actor cannot be established. See
+    # policy.DISABLED_METHODS and DISABLED_REASONS.
 
     # -- 8. binary uploads (opt-in) ---------------------------------------
 
@@ -575,6 +691,11 @@ class WriteOperations:
         img_type = validate_enum(image_type, IMAGE_TYPES, "image_type")
         media = _decode_base64(image_bytes_b64, "image_bytes_b64", _MAX_IMAGE_BYTES)
         content_type = _sniff_image_type(media)
+        if content_type == "application/octet-stream":
+            raise ValidationError(
+                "image_bytes_b64 is not a PNG or JPEG image (the only image "
+                "formats Play accepts for store graphics)"
+            )
         data = self._client.request(
             "edits.images.upload",
             params={"packageName": pkg, "editId": edit, "language": lang,
@@ -643,8 +764,12 @@ class WriteOperations:
         self._settings.require_artifact_upload_enabled("bundle_upload")
         _, edit = self._edit(pkg, edit_id)
         media = _decode_base64(bundle_bytes_b64, "bundle_bytes_b64", _MAX_ARTIFACT_BYTES)
-        if not media.startswith(b"PK"):
-            raise ValidationError("bundle_bytes_b64 does not look like an AAB (expected a zip)")
+        members = _require_zip(media, "bundle_bytes_b64", "AAB")
+        if members is not None and "base/manifest/AndroidManifest.xml" not in members:
+            raise ValidationError(
+                "bundle_bytes_b64 is a zip but not an Android App Bundle: it is "
+                "missing base/manifest/AndroidManifest.xml"
+            )
         data = self._client.request(
             "edits.bundles.upload",
             params={"packageName": pkg, "editId": edit},
@@ -656,7 +781,7 @@ class WriteOperations:
             "read_back": {"bundles": self._safe_bundles(pkg, edit)},
             "warning": (
                 "Uploading stages an artifact into the edit; it does not publish. "
-                "Publishing requires play_edit_commit behind the release gate."
+                "This server exposes no commit, so the artifact is never applied."
             ),
         }
 
@@ -666,8 +791,7 @@ class WriteOperations:
         self._settings.require_artifact_upload_enabled("apk_upload")
         _, edit = self._edit(pkg, edit_id)
         media = _decode_base64(apk_bytes_b64, "apk_bytes_b64", _MAX_ARTIFACT_BYTES)
-        if not media.startswith(b"PK"):
-            raise ValidationError("apk_bytes_b64 does not look like an APK (expected a zip)")
+        _require_zip(media, "apk_bytes_b64", "APK")
         data = self._client.request(
             "edits.apks.upload",
             params={"packageName": pkg, "editId": edit},
@@ -677,7 +801,7 @@ class WriteOperations:
         return {
             **self._base(pkg), "edit_id": edit, "result": data,
             "read_back": {"apks": self._safe_apks(pkg, edit)},
-            "warning": "Staged only; publishing requires play_edit_commit.",
+            "warning": "Staged only; this server exposes no commit, so nothing is applied.",
         }
 
     def _safe_bundles(self, pkg: str, edit: str) -> Any:
@@ -714,7 +838,7 @@ class WriteOperations:
         return {
             **self._base(pkg), "edit_id": edit, "apk_version_code": version,
             "file_type": ftype, "result": data,
-            "warning": "Staged into the edit; requires a gated play_edit_commit.",
+            "warning": "Staged into the edit; this server exposes no commit.",
         }
 
 
@@ -978,23 +1102,26 @@ def _build_tool_specs() -> dict[str, dict[str, Any]]:
                 ["package_name", "edit_id", "track"],
             ),
         },
-        "play_edit_commit": {
-            "attr": "edit_commit",
-            "method_id": "edits.commit",
+        "play_track_create": {
+            "attr": "track_create",
+            "method_id": "edits.tracks.create",
             "description": (
-                "PUBLISH GATE: apply every change staged in an edit "
-                "(POST .../edits/{editId}:commit). Requires the release gate, an "
-                "edit id this server opened, and confirm_edit_id repeated exactly."
+                "Create a NEW track in the edit (POST .../tracks with a "
+                "TrackConfig). Only closed-testing tracks are supported, and "
+                "only the fixed track ids are accepted; this is the only API "
+                "path that can create a track. Requires the release gate. Does "
+                "NOT publish."
             ),
             "schema": _schema(
                 {
                     "package_name": _PKG, "edit_id": _EDIT,
-                    "confirm_edit_id": {
-                        "type": "string",
-                        "description": "Repeat edit_id verbatim to confirm the publish.",
+                    "track": {"type": "string", "enum": sorted(_TRACKS)},
+                    "form_factor": {
+                        "type": "string", "enum": sorted(_FORM_FACTORS),
+                        "default": "DEFAULT",
                     },
                 },
-                ["package_name", "edit_id", "confirm_edit_id"],
+                ["package_name", "edit_id", "track"],
             ),
         },
         "play_image_upload": {
@@ -1102,6 +1229,51 @@ def _build_tool_specs() -> dict[str, dict[str, Any]]:
 TOOL_SPECS: dict[str, dict[str, Any]] = _build_tool_specs()
 
 
+def _mismatches(observed: Any, expected: Mapping[str, Any],
+                container: str | None = None) -> dict[str, Any]:
+    """Return ``{field: {intended, observed}}`` for fields that do not match.
+
+    ``expected`` holds the camelCase body keys that were written. ``container``
+    names a wrapper list (e.g. ``tracks``) whose first element holds the
+    comparison fields; if it is absent, a dict is compared directly and a list
+    of wrappers is searched for one carrying the expected keys.
+    """
+    if not isinstance(expected, Mapping) or not expected:
+        return {}
+
+    candidates: list[Any]
+    if container is not None:
+        inner = observed.get(container) if isinstance(observed, Mapping) else None
+        candidates = list(inner) if isinstance(inner, list) else []
+    elif isinstance(observed, list):
+        candidates = list(observed)
+    elif isinstance(observed, Mapping):
+        candidates = [observed]
+    else:
+        candidates = []
+
+    # Pick the element that carries the most of the expected keys.
+    best: Mapping[str, Any] | None = None
+    best_score = -1
+    for item in candidates:
+        if not isinstance(item, Mapping):
+            continue
+        score = sum(1 for key in expected if key in item)
+        if score > best_score:
+            best, best_score = item, score
+    if best is None:
+        best = {}
+
+    diffs: dict[str, Any] = {}
+    for key, intended in expected.items():
+        if key not in best:
+            continue
+        got = best.get(key)
+        if got != intended:
+            diffs[key] = {"intended": intended, "observed": got}
+    return diffs
+
+
 def _listing_body(title, short_description, full_description, video) -> dict[str, Any]:
     body: dict[str, Any] = {}
     if title is not None:
@@ -1147,6 +1319,40 @@ def _decode_base64(value: str, field: str, max_bytes: int) -> bytes:
     return decoded
 
 
+#: A zip archive begins with a local-file-header signature ``PK\x03\x04`` (an
+#: empty archive with ``PK\x05\x06``, a spanned archive with ``PK\x07\x08``). The
+#: bare ``PK`` prefix is too weak: ``PKjunk...`` is not an archive.
+_ZIP_SIGNATURES = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
+
+
+def _zip_members(media: bytes) -> list[str] | None:
+    """Return the archive's member names, or ``None`` if it is not a readable zip.
+
+    ``None`` means "not a parseable zip", which is distinct from "an empty zip":
+    a caller that sends a signature and junk is not sending an archive.
+    """
+    import io
+    import zipfile
+
+    if not media.startswith(_ZIP_SIGNATURES):
+        return None
+    try:
+        with zipfile.ZipFile(io.BytesIO(media)) as archive:
+            return archive.namelist()
+    except (zipfile.BadZipFile, ValueError, OSError):
+        return None
+
+
+def _require_zip(media: bytes, field: str, label: str) -> list[str] | None:
+    """Refuse a payload that is not a zip; return members if it parses as one."""
+    if not media.startswith(_ZIP_SIGNATURES):
+        raise ValidationError(
+            f"{field} does not look like {'an AAB' if label == 'AAB' else 'an APK'} "
+            "(expected a zip archive: no PK local-file-header signature)"
+        )
+    return _zip_members(media)
+
+
 def _sniff_image_type(media: bytes) -> str:
     if media.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
@@ -1159,30 +1365,3 @@ def _now() -> float:
     import time
 
     return time.time()
-
-
-def _validation_errors(payload: Any) -> list[str]:
-    """Extract human-readable errors from an ``edits.validate`` response.
-
-    The endpoint returns an ``AppEdit``; validation problems surface as a Google
-    error body (handled upstream) or, for a successful call, nothing to report.
-    This helper is deliberately conservative: any explicitly reported error list
-    is returned, and an unexpected shape is treated as "no errors reported"
-    rather than inventing a failure.
-    """
-    if not isinstance(payload, dict):
-        return []
-    messages: list[str] = []
-    for key in ("errors", "error", "validationErrors"):
-        value = payload.get(key)
-        if isinstance(value, list):
-            for item in value:
-                if isinstance(item, str):
-                    messages.append(item)
-                elif isinstance(item, dict):
-                    text = item.get("message") or item.get("reason") or item.get("detail")
-                    if text:
-                        messages.append(str(text))
-        elif isinstance(value, str) and value:
-            messages.append(value)
-    return messages

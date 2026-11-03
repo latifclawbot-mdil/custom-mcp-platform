@@ -8,19 +8,19 @@ An **edit id is a shared handle**. Whoever commits it applies everything staged
 into it — including financial changes (a price, a base plan, an offer) staged by
 some other actor that holds the same id. So "our code never sets a price" is not
 enough on its own: a commit of a shared edit could carry a price someone else
-staged. Three controls close that, and this module implements the first:
+staged. Two controls close that, and this module implements the first:
 
 1. **Ownership.** Every edit this server opens is recorded here. Every staged
-   mutation, ``edits.tracks.update`` and ``edits.commit`` must name an edit id in
-   this registry. An edit id the server did not open is refused *before any
-   network call*, so it cannot be used to stage into — or commit — a session
-   whose other contents it cannot account for.
-2. **Configuration gate.** ``edits.commit`` additionally requires
-   ``PLAY_WRITER_ENABLE_RELEASE_GATE``; it is off by default.
-3. **Disclosure of the residual gap.** The API has no "list what is staged in
-   this edit" endpoint, so this server cannot prove an edit it opened stayed
-   financial-free. :meth:`EditRegistry.risk_note` and the commit result say so
-   explicitly rather than implying a guarantee that does not exist.
+   mutation and ``edits.tracks.update``/``create`` must name an edit id in the
+   registry. An edit id the server did not open is refused *before any network
+   call*, so it cannot be used to stage into a session whose other contents it
+   cannot account for. A second ``edits.insert`` for a package that already has
+   a live tracked edit is also refused: Google would discard the first, losing
+   everything staged into it.
+2. **No commit at all.** This server exposes no ``edits.commit``. Because the
+   API has no "list what is staged in this edit" endpoint, it cannot prove an
+   edit it opened stayed financial-free, so it does not apply edits. See
+   ``policy.DISABLED_METHODS``.
 
 The registry is in-memory and per-process on purpose: it is a safety interlock,
 not durable storage. A restarted server forgets its edits and refuses to touch
@@ -82,14 +82,47 @@ class EditRegistry:
         self._lock = threading.Lock()
 
     def open_edit(self, package: str, edit_id: str) -> TrackedEdit:
-        track = TrackedEdit(
-            package=package, edit_id=edit_id, opened_at=self._clock(),
-            expiry_seconds=self._ttl,
-        )
+        """Track a freshly opened edit, or refuse if that id is already tracked.
+
+        Two fail-closed rules:
+
+        * an id already recorded here is refused rather than overwritten.
+          Overwriting would wipe the stage history and reset the committed
+          guard, so a caller could re-open a committed edit and keep staging
+          into it as if it were fresh.
+        * at capacity the new edit is refused rather than evicting the oldest.
+          An evicted edit may still be mid-workflow; silently dropping its
+          ownership is the unsafe direction because the server would then
+          refuse to touch an edit it legitimately opened (or, worse, allow a
+          later stage into an id it no longer accounts for).
+
+        Expired entries are not "live": Google has already discarded those
+        edits, so their slots are reclaimed before the capacity check.
+        """
+        key = (package, edit_id)
         with self._lock:
+            self._reap_expired_locked()
+            if key in self._edits:
+                existing = self._edits[key]
+                state = "already committed" if existing.committed else "still open"
+                raise LocalError(
+                    f"edit {edit_id!r} for {package!r} is {state} in this server "
+                    "session and was already tracked; refusing to re-open it. "
+                    "Open a new edit with play_edit_insert instead of reusing an "
+                    "id this server already accounts for."
+                )
             if len(self._edits) >= MAX_TRACKED_EDITS:
-                self._evict_oldest_locked()
-            self._edits[(package, edit_id)] = track
+                raise LocalError(
+                    f"this server is already tracking the maximum of "
+                    f"{MAX_TRACKED_EDITS} edits; refusing to open another rather "
+                    "than evicting a live edit. Finish or discard an existing "
+                    "edit (play_edit_delete) before opening a new one."
+                )
+            track = TrackedEdit(
+                package=package, edit_id=edit_id, opened_at=self._clock(),
+                expiry_seconds=self._ttl,
+            )
+            self._edits[key] = track
         return track
 
     def require_owned(self, package: str, edit_id: str) -> TrackedEdit:
@@ -150,8 +183,30 @@ class EditRegistry:
             track = self._edits.get((package, edit_id))
             return list(track.staged) if track else []
 
-    def _evict_oldest_locked(self) -> None:
-        if not self._edits:
-            return
-        oldest = min(self._edits, key=lambda key: self._edits[key].opened_at)
-        self._edits.pop(oldest, None)
+    def live_edit_for(self, package: str) -> str | None:
+        """Return the id of a live (unexpired, uncommitted) edit for ``package``.
+
+        Google allows one active edit per app; opening a second one discards the
+        first, silently losing everything staged into it. Callers use this to
+        refuse a second ``edits.insert`` *before* the request is sent.
+        """
+        now = self._clock()
+        with self._lock:
+            for (pkg, edit_id), track in self._edits.items():
+                if pkg != package or track.committed or track.expired(now):
+                    continue
+                return edit_id
+        return None
+
+    def _reap_expired_locked(self) -> None:
+        """Drop entries whose TTL has passed; their Google edits are gone too.
+
+        Called under the lock from :meth:`open_edit`. An expired entry is not a
+        live edit — Google discards an uncommitted edit after ~7 days — so its
+        slot is safe to reuse. This is the *only* removal path besides an
+        explicit :meth:`release`; a live or committed edit is never evicted.
+        """
+        now = self._clock()
+        expired = [key for key, track in self._edits.items() if track.expired(now)]
+        for key in expired:
+            self._edits.pop(key, None)

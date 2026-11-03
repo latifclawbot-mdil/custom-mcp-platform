@@ -10,7 +10,7 @@ Startup contract
 * Credentials are resolved lazily on the first API call, so ``initialize`` and
   ``list_tools`` work with no credentials present.
 * Every write tool is annotated with ``readOnlyHint=False``. Destructive tools
-  (delete/deleteall/commit) carry ``destructiveHint=True``; the rest carry
+  (delete/deleteall) carry ``destructiveHint=True``; the rest carry
   ``destructiveHint=False``. The capability tool is ``readOnlyHint=True``.
 * Policy, validation and upstream failures are returned as ``isError`` results
   via :class:`ToolError`, never as successful payloads.
@@ -48,7 +48,6 @@ _DESTRUCTIVE_TOOLS = frozenset({
     "play_image_delete",
     "play_images_delete_all",
     "play_edit_delete",
-    "play_edit_commit",
 })
 
 #: Tools annotated read-only (no upstream mutation).
@@ -150,7 +149,7 @@ def _annotations(tool_name: str, method_id: str | None) -> ToolAnnotations:
         )
     destructive = tool_name in _DESTRUCTIVE_TOOLS
     # Idempotent unless the underlying method repeats an effect on retry.
-    idempotent = method_id not in {"edits.insert", "edits.commit"}
+    idempotent = method_id not in {"edits.insert", "edits.tracks.create"}
     return ToolAnnotations(
         title=tool_name.replace("_", " "),
         read_only_hint=False,
@@ -338,6 +337,18 @@ def _make_dispatcher(tool_name: str, ops: WriteOperations,
     """Build the shared body: validate args, call the operation, map errors."""
 
     def dispatch(kwargs: dict[str, Any]) -> str:
+        # Refuse an unknown *key* before dropping unset optionals. Dropping
+        # ``None`` first would let ``{"price": None}`` vanish and the call
+        # succeed as if the argument had been honoured — the opposite of
+        # fail-closed. A declared optional may still be explicitly null.
+        declared = spec["schema"].get("properties") or {}
+        unknown = [key for key in kwargs if key not in declared]
+        if unknown:
+            raise ToolError(
+                f"invalid arguments: {', '.join(sorted(unknown))} is not a "
+                "recognised argument for this tool"
+            )
+
         # Drop unset optional parameters so operation defaults apply.
         cleaned = {k: v for k, v in kwargs.items() if v is not None}
 

@@ -88,8 +88,11 @@ class FakeApiTransport(httpx.BaseTransport):
     def __init__(self) -> None:
         # (verb, path, query dict, json body or None)
         self.requests: list[tuple[str, str, dict[str, str], Any]] = []
-        #: path-substring -> (status, json payload)
+        #: path-substring -> (status, json payload) applied to every request
         self.overrides: dict[str, tuple[int, Any]] = {}
+        #: path-substring -> (status, json payload) applied to GET reads only, so
+        #: a test can fail the read-back while leaving the mutation successful.
+        self.read_overrides: dict[str, tuple[int, Any]] = {}
         #: set to raise a transport error on the next Nth write
         self.raise_on_write: Exception | None = None
 
@@ -109,6 +112,11 @@ class FakeApiTransport(httpx.BaseTransport):
             exc = self.raise_on_write
             self.raise_on_write = None
             raise exc
+
+        if request.method == "GET":
+            for needle, (status, payload) in self.read_overrides.items():
+                if needle in path:
+                    return httpx.Response(status, json=payload)
 
         for needle, (status, payload) in self.overrides.items():
             if needle in path:

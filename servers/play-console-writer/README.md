@@ -19,11 +19,22 @@ method anywhere in the registry.
 The claim is **not** "all non-financial Play actions". It is: *these 22 write
 methods, explicitly named, with everything else refused.*
 
+**Disabled outright** (the API allows it; this server refuses it): `edits.commit`.
+Committing an edit applies everything staged into it, the API exposes no endpoint
+that lists what is staged, and an edit id is a shared handle — so the absence of a
+financial change staged by another actor cannot be established. Rather than gate a
+method it cannot make fail-closed, this server exposes no commit at all. See
+`policy.DISABLED_METHODS`; `play_describe_capability` reports it under
+`disabled_methods` with `commit_available: false`.
+
 **Excluded because it is financial or reaches finance** (never reachable — no
 tool, parameter, or path):
 
 - money movement: `orders.refund`, `orders.reviewrefund`,
   `externaltransactions.refundexternaltransaction`
+- external-transaction bookkeeping: `externaltransactions.createexternaltransaction`
+  (records an externally-settled payment; its body carries pre/post-tax amounts
+  and a user tax address). Financial, not a mere scope exclusion.
 - price / tax setters: every `inappproducts.*` insert/update/patch/batchUpdate,
   `monetization.convertRegionPrices`, `monetization.subscriptions.*` create/patch/
   batchUpdate, `basePlans.migratePrices` / `batchMigratePrices`, offer
@@ -48,12 +59,13 @@ tool, parameter, or path):
 | Group | Methods | Why |
 | --- | --- | --- |
 | signing | `appsigning.enrollApp`, `rotateAppSigningKey` | changes the key that authenticates the shipped app |
-| internal app sharing | `internalappsharingartifacts.*` | artifact channel with no gate beyond the API scope |
-| expansion files | `edits.expansionfiles.*`, `edits.apks.addexternallyhosted` | forks the shipped artifact set |
+| internal app sharing | `internalappsharingartifacts.*` | internal-only channel, gated by "Release apps to testing tracks" (which cannot publish to production); excluded on scope, not because it is ungated |
+| expansion files | `edits.expansionfiles.*`, `edits.apks.addexternallyhosted` | legacy OBB / self-hosted APK routes; OBB supplements the APK and both are superseded by App Bundle + Play Asset Delivery |
 | remediation | `apprecovery.create/deploy/addTargeting/cancel` | `deploy` can push a release to production |
 | store review | `appstoreappsreview.*` | separate, un-reviewed publishing surface |
-| OEM variants | `systemapks.variants.create` | forks the shipped artifact set |
-| duplicate track verbs | `edits.tracks.create`, `edits.tracks.patch` | redundant with `edits.tracks.update`; one release path |
+| OEM variants | `systemapks.variants.create` | builds an OEM/device-specific APK variant |
+| duplicate track verb | `edits.tracks.patch` | PATCH to the same path/body as `edits.tracks.update`; redundant. `edits.tracks.create` IS supported: it is the only API path that can create a track |
+| commit | `edits.commit` | disabled: staged contents cannot be enumerated, so a financial change cannot be ruled out (see above) |
 | batch reads | `*.offers.batchGet` | POST-verb reads; this server has no read tools |
 
 **Not possible in the API at all** (so no server can promise them): content
@@ -62,10 +74,12 @@ status, base app price / free-paid state, installs / ratings / crashes / revenue
 reports, a "list my apps" endpoint, tester email lists (Google Groups only), and
 Google-managed signing enrollment.
 
-**Publish gate and release gate.** `play_edit_commit` (apply an edit) and
-`play_track_update` (stage a release definition) exist, but both are behind
-`PLAY_WRITER_ENABLE_RELEASE_GATE`, which defaults to **off**. With the default
-configuration this server cannot publish anything.
+**Release gate, and no publish path.** `play_track_update` (replace a track's
+release list) and `play_track_create` (create a new track) exist, but both are
+behind `PLAY_WRITER_ENABLE_RELEASE_GATE`, which defaults to **off**. There is no
+`play_edit_commit` tool and no commit method: applying an edit cannot be proven
+free of financial changes staged by another actor, so this server never applies
+one. With the default configuration it can neither stage a release nor publish.
 
 ---
 
@@ -128,7 +142,10 @@ Require `PLAY_WRITER_ENABLE_RELEASE_GATE=true`.
 | Tool | Method | Notes |
 | --- | --- | --- |
 | `play_track_update` | `edits.tracks.update` PUT | stages version codes, status, staged-rollout fraction, release notes, country targeting |
-| `play_edit_commit` | `edits.commit` POST | **publishes**. Requires `confirm_edit_id` repeated exactly, and validates the edit first |
+| `play_track_create` | `edits.tracks.create` POST | creates a NEW closed-testing track from a `TrackConfig`; the only API path that can create a track. Fixed `type: CLOSED_TESTING` and `form_factor` enum, no passthrough |
+
+There is deliberately **no** `play_edit_commit`. See the disabled-method section
+above.
 
 ### Capability
 
@@ -155,16 +172,23 @@ Require `PLAY_WRITER_ENABLE_RELEASE_GATE=true`.
    `androidpublisher.googleapis.com` over HTTPS, or a loopback address for
    tests. A static test token is only legal together with a loopback base.
 5. **Edit ownership.** Every staged mutation, `play_track_update` and
-   `play_edit_commit` must name an edit id this server opened
-   (`edit_registry.EditRegistry`). An edit id from elsewhere is refused — see
-   the shared-edit hazard below.
+   `play_track_create` must name an edit id this server opened
+   (`edit_registry.EditRegistry`). An edit id from elsewhere is refused, and a
+   second `edits.insert` for a package with a live edit is refused before the
+   request — see the shared-edit hazard below.
 6. **No write retries.** Writes are sent once. A transport failure raises
    `WriteOutcomeUnknown`, which says plainly that the change may have been
    applied rather than guessing "it failed". Only verification GETs retry.
-7. **Read-back after every staged write** where the API offers one; the tool
-   result carries the observed state, so a 200 alone is never the evidence.
+7. **No arbitrary query parameters.** Each method declares the query parameters
+   it accepts (only `deviceTierConfigs.create` declares `allowUnknownDevices`);
+   anything else is a policy error, so `changesNotSentForReview` cannot be set.
+8. **Read-back after every staged write** where the API offers one; the tool
+   result carries `outcome` (`applied` / `applied_unverified`) plus a
+   `verification` block, so a 200 alone is never the evidence — and a failed
+   read-back is reported as unverified, not as a tool error that invites a
+   duplicate retry.
 
-### The shared-edit hazard (disclosed, not hidden)
+### The shared-edit hazard (why commit is disabled)
 
 An edit id is a **shared handle**. Whoever commits it applies everything staged
 into it, including a price someone else staged. Android Publisher exposes no
@@ -173,15 +197,11 @@ edit it opened stayed financial-free.
 
 What it does about it:
 
-- refuses to commit or stage into an edit it did not open (control 5);
-- keeps the release gate off by default;
-- returns the disclosure in `play_edit_commit`'s `residual_risk` field, and
-  states it again in `play_describe_capability`.
-
-The remaining gap is real: if an operator shares an edit id with another writer
-that stages a financial change, committing that edit through this server applies
-it too. The mitigation is procedural (don't share edit ids) and is stated as
-such rather than claimed as solved.
+- refuses to stage into an edit it did not open (control 5), and refuses a second
+  live edit for the same package;
+- exposes **no commit at all** — the one guarantee that survives the hazard;
+- states the reason in `play_describe_capability` (`disabled_methods`,
+  `commit_available: false`).
 
 ### Second layer: Play Console permissions
 
@@ -204,7 +224,7 @@ bypassed with the same credential.
 | `PLAY_WRITER_SUBJECT` | — | domain-wide delegation subject (requires a credentials file) |
 | `PLAY_WRITER_REQUEST_TIMEOUT` | `20` | seconds, 0.1–300 |
 | `PLAY_WRITER_MAX_REPLY_LENGTH` | `350` | cap on `reviews.reply` text |
-| `PLAY_WRITER_ENABLE_RELEASE_GATE` | `false` | enables `play_edit_commit` and `play_track_update` |
+| `PLAY_WRITER_ENABLE_RELEASE_GATE` | `false` | enables `play_track_update` and `play_track_create` |
 | `PLAY_WRITER_ENABLE_ARTIFACT_UPLOAD` | `false` | enables the three binary upload tools |
 | `PLAY_WRITER_TEST_LOOPBACK_BASE` | — | test only; must be loopback |
 | `PLAY_WRITER_TEST_STATIC_TOKEN` | — | test only; requires the loopback base |

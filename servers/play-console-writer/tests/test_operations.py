@@ -281,57 +281,29 @@ def test_track_update_rejects_out_of_range_user_fraction(unlocked_ops):
         operations.track_update(PKG, edit, "production", user_fraction=1.0)
 
 
-def test_commit_refused_when_release_gate_is_off(ops):
-    operations, transport, _ = ops
-    edit = open_edit(operations, transport)
-    with pytest.raises(Exception, match="release gate"):
-        operations.edit_commit(PKG, edit, confirm_edit_id=edit)
+def test_commit_operation_does_not_exist(unlocked_ops):
+    """Commit is disabled: there is no operation, even with both gates on.
+
+    The Android Publisher API exposes no endpoint that lists what is staged in
+    an edit. A shared edit id can therefore carry a financial change staged by
+    another actor, and this server cannot establish otherwise. With the user's
+    financial exclusion in force, the only fail-closed choice is no commit.
+    """
+    operations, transport, _ = unlocked_ops
+    assert not hasattr(operations, "edit_commit")
 
 
-def test_commit_requires_matching_confirmation(unlocked_ops):
+def test_no_operation_can_send_a_commit_request(unlocked_ops):
     operations, transport, _ = unlocked_ops
     edit = open_edit(operations, transport)
-    with pytest.raises(ValidationError, match="confirm_edit_id"):
-        operations.edit_commit(PKG, edit, confirm_edit_id="something-else")
+    # Nothing in the public operation surface stages a commit, and the client
+    # registry has no spec for it, so even a direct method id is refused.
+    from play_console_writer.client import METHOD_SPECS
 
-
-def test_commit_calls_validate_then_commit(unlocked_ops):
-    operations, transport, _ = unlocked_ops
-    edit = open_edit(operations, transport)
-    result = operations.edit_commit(PKG, edit, confirm_edit_id=edit)
-    verbs = [(w[0], w[1]) for w in transport.writes()]
-    assert verbs[0][1].endswith(":validate")
-    assert verbs[1][1].endswith(":commit")
-    assert result["committed"] is True
-    assert "residual_risk" in result
-
-
-def test_commit_refuses_after_successful_commit(unlocked_ops):
-    operations, transport, _ = unlocked_ops
-    edit = open_edit(operations, transport)
-    operations.edit_commit(PKG, edit, confirm_edit_id=edit)
-    with pytest.raises(LocalError, match="already committed"):
-        operations.track_update(PKG, edit, "production", version_codes=[42])
-
-
-def test_commit_aborts_when_validation_reports_errors(unlocked_ops):
-    operations, transport, _ = unlocked_ops
-    edit = open_edit(operations, transport)
-    transport.overrides[":validate"] = (200, {"errors": [{"message": "bad listing"}]})
-    with pytest.raises(LocalError, match="does not validate"):
-        operations.edit_commit(PKG, edit, confirm_edit_id=edit)
-    assert not any(w[1].endswith(":commit") for w in transport.writes())
-
-
-def test_commit_echo_names_commit_not_the_validation(unlocked_ops):
-    """The pre-commit validation is an auxiliary call and must not shadow the echo."""
-    operations, transport, _ = unlocked_ops
-    edit = open_edit(operations, transport)
-    operations.edit_commit(PKG, edit, confirm_edit_id=edit)
-    from play_console_writer.client import GoogleWriteClient
-
-    client = operations._client
-    assert client._last_write_request["method_id"] == "edits.commit"
+    assert "edits.commit" not in METHOD_SPECS
+    operations.track_update(PKG, edit, "production", version_codes=[42],
+                            status="draft")
+    assert not any(w[1].endswith(":commit") for w in transport.requests)
 
 
 # --------------------------------------------------------------------------

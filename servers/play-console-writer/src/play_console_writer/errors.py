@@ -26,7 +26,33 @@ __all__ = [
 
 _MAX_BODY = 800
 
-# Anything resembling a bearer/access token, OAuth code, or key material.
+#: A complete PEM private-key block, body included. The body is the secret; a
+#: pattern that matches only the BEGIN/END markers leaves the key material in
+#: the preview verbatim. ``[\s\S]`` spans real newlines *and* the ``\n`` escape
+#: sequences a JSON body contains. If the END marker never arrives (a truncated
+#: body) everything from BEGIN to the end is treated as secret.
+_PEM_BLOCK = re.compile(
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"
+    r"[\s\S]*?"
+    r"(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\Z)",
+    re.IGNORECASE,
+)
+
+#: ``key=value`` / ``"key": "value"`` pairs whose value is credential material.
+#: This runs *after* the PEM block rule so a ``"private_key": "-----BEGIN...``
+#: value is consumed by the block rule first, and the body cannot leak through
+#: the assignment rule stopping at its first whitespace.
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)\b(?:access_token|refresh_token|id_token|private_key_id|private_key|"
+    r"client_secret|client_id|api_key|apikey|token|password|passwd|secret|"
+    r"session_id|sessionid|set-cookie|cookie|sidcc|sid|authorization|"
+    r"error_description)\b"
+    r"\s*[:=]\s*"
+    r"(?:\"[^\"]*\"|'[^']*'|[^\s\"',;}\]]+)"
+)
+
+# Anything resembling a bearer/access token, OAuth code, or key marker left over
+# after the two rules above.
 #
 # These deliberately avoid leading ``\b`` word boundaries: Google credentials
 # are routinely embedded in larger strings (e.g. ``prefixya29.SECRET`` in a
@@ -39,12 +65,18 @@ _TOKEN_PATTERNS = (
     re.compile(r"(?<![\w/])4/[A-Za-z0-9._\-]{10,}"),
     re.compile(r"(?i)Bearer\s+[A-Za-z0-9._\-~+/=]+"),
     re.compile(r"(?i)1//[A-Za-z0-9._\-]+"),
-    re.compile(r"(?i)(client_secret|refresh_token|private_key|access_token|id_token)"
-               r"\s*[\"']?\s*[:=]\s*[\"']?[^\s\"',}]+"),
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    # A private-key marker with no END marker (truncated preview).
+    re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----", re.IGNORECASE),
 )
 _SECRET_HEADERS = ("authorization", "www-authenticate", "proxy-authorization",
                    "set-cookie", "cookie", "x-goog-iap-jwt-assertion")
+#: Header names whose value is opaque session/credential material. Such a value
+#: is never used as a diagnostic reason; a fixed structural phrase stands in so
+#: the cookie/token text cannot ride out inside the error message.
+_OPAQUE_SECRET_HEADERS = frozenset({
+    "authorization", "www-authenticate", "proxy-authorization", "set-cookie",
+    "cookie", "x-goog-iap-jwt-assertion",
+})
 
 
 def redact_text(text: str) -> str:
@@ -53,13 +85,18 @@ def redact_text(text: str) -> str:
     Non-JSON bodies (proxy HTML error pages, stack traces) routinely embed
     session cookies and internal hostnames, so they are summarised rather than
     echoed: only the byte count and a structural hint survive.
+
+    Ordering matters: a private-key block is stripped *before* the generic
+    ``key=value`` rule, because that rule would otherwise stop at the first
+    newline inside a PEM body and leave the key material behind.
     """
     if not text:
         return ""
     stripped = text.lstrip()
     if stripped.startswith("<"):
         return f"[non-JSON body redacted, {len(text)} bytes]"
-    out = text
+    out = _PEM_BLOCK.sub("[REDACTED PRIVATE KEY BLOCK]", text)
+    out = _SECRET_ASSIGNMENT.sub("[REDACTED]", out)
     for pattern in _TOKEN_PATTERNS:
         out = pattern.sub("[REDACTED]", out)
     if len(out) > _MAX_BODY:
@@ -150,9 +187,14 @@ def redact_upstream_error(*, status: int, body, url: str = "", headers=None) -> 
 
     reason, embedded = _extract_reason(payload)
     if not reason and headers:
-        for key, value in headers.items():
-            if str(key).lower() in _SECRET_HEADERS:
-                reason = str(value)
+        for key, _value in headers.items():
+            name = str(key).lower()
+            if name in _SECRET_HEADERS:
+                # The value of a session/auth header is credential material, not
+                # a diagnostic string: a cookie, a bearer token, or an OAuth
+                # error_description. Naming the header is enough for a caller to
+                # act; echoing the value would leak it into a log line.
+                reason = f"rejected by upstream ({name} header present)"
                 break
     if not reason and text:
         reason = "see body"
@@ -199,16 +241,14 @@ def error_from_http_response(*, status, reason, headers=None, body=None, url="")
     if not reason and 100 <= status < 600:
         reason = http.client.responses.get(status, "")
 
-    header_reason = ""
+    header_names: list[str] = []
     if headers:
         try:
             items = headers.items()
         except AttributeError:  # pragma: no cover - defensive
             items = headers
-        for key, value in items:
-            if str(key).lower() in _SECRET_HEADERS:
-                header_reason = str(value)
-                break
+        header_names = [str(key).lower() for key, _value in items
+                        if str(key).lower() in _OPAQUE_SECRET_HEADERS]
 
     result = redact_upstream_error(
         status=status or 502,
@@ -217,7 +257,8 @@ def error_from_http_response(*, status, reason, headers=None, body=None, url="")
     )
     if reason:
         result.reason = redact_text(str(reason)).strip() or result.reason
-    elif header_reason:
-        result.reason = redact_text(header_reason)
+    elif header_names:
+        # Never use the secret header's *value* as the reason; name the header.
+        result.reason = f"rejected by upstream ({', '.join(sorted(set(header_names)))} present)"
     result.args = (result._message(),)
     return result

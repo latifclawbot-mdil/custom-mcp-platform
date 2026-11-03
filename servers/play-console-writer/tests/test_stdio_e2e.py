@@ -67,7 +67,9 @@ async def test_tools_list_exposes_writes_and_the_capability_tool(upstream):
     names = {t.name for t in listing.tools}
     assert "play_listing_update" in names
     assert "play_describe_capability" in names
-    assert "play_edit_commit" in names
+    # commit is disabled: the API cannot enumerate a shared edit's contents, so
+    # the absence of a financial change cannot be established.
+    assert "play_edit_commit" not in names
     # No generic request tool, and no financial tool.
     assert not any("request" == n or n.endswith("_call") for n in names)
     for tool in listing.tools:
@@ -94,7 +96,6 @@ async def test_destructive_tools_are_marked(upstream):
     listing = await with_client(upstream, body)
     by_name = {t.name: t for t in listing.tools}
     assert by_name["play_listing_delete"].annotations.destructive_hint is True
-    assert by_name["play_edit_commit"].annotations.destructive_hint is True
     assert by_name["play_listing_update"].annotations.destructive_hint is False
 
 
@@ -106,8 +107,8 @@ async def test_schemas_advertise_enums_and_bounds(upstream):
     by_name = {t.name: t for t in listing.tools}
     img = by_name["play_image_upload"].input_schema["properties"]
     assert "icon" in img["image_type"]["enum"]
-    commit = by_name["play_edit_commit"].input_schema
-    assert set(commit["required"]) == {"package_name", "edit_id", "confirm_edit_id"}
+    track = by_name["play_track_update"].input_schema
+    assert "production" in track["properties"]["track"]["enum"]
 
 
 # --------------------------------------------------------------------------
@@ -186,20 +187,74 @@ async def test_unknown_argument_is_refused_over_the_wire(upstream):
     assert "not a recognised argument" in result.content[0].text
 
 
-async def test_commit_is_refused_when_release_gate_is_off(upstream):
+async def test_commit_tool_is_not_exposed_at_all(upstream):
+    """Commit is disabled, not merely gated: the tool must not exist."""
+    async def body(session, init):
+        return await session.call_tool("play_edit_commit", {
+            "package_name": PKG, "edit_id": "edit-1", "confirm_edit_id": "edit-1",
+        })
+
+    result = await with_client(upstream, body)
+    assert result.is_error is True
+    assert "unknown tool" in result.content[0].text.lower()
+    # Nothing reached the upstream: there is no code path left that commits.
+    assert not any(r.path.endswith(":commit") for r in upstream.requests)
+
+
+async def test_capability_reports_commit_disabled_and_why(upstream):
+    async def body(session, init):
+        return await session.call_tool("play_describe_capability", {})
+
+    payload = payload_of(await with_client(upstream, body))
+    caps = payload["data"]
+    disabled = {entry["method_id"]: entry["reason"]
+                for entry in caps["disabled_methods"]}
+    assert "edits.commit" in disabled
+    assert "financial" in disabled["edits.commit"].lower()
+    assert caps["commit_available"] is False
+
+
+async def test_private_key_body_never_reaches_the_client_over_the_wire(upstream):
+    """F1 at the real transport: an upstream PEM body must be redacted."""
+    pem = ("-----BEGIN PRIVATE KEY-----\n"
+           "MIIEvQIBADANBgkqhkiG9w0BASESECRETKEYBODY=\n"
+           "-----END PRIVATE KEY-----")
+    upstream.responses["/dataSafety"] = (
+        401, {"error": {"code": 401, "status": "UNAUTHENTICATED",
+                        "message": "denied", "details": pem}})
+
+    async def body(session, init):
+        return await session.call_tool(
+            "play_data_safety_update",
+            {"package_name": PKG, "safety_labels_csv": "a,b"})
+
+    result = await with_client(upstream, body)
+    text = result.content[0].text
+    assert result.is_error is True
+    assert "BASESECRETKEYBODY" not in text
+    assert "MIIEvQ" not in text
+
+
+async def test_listing_update_read_back_failure_is_unverified_over_the_wire(upstream):
+    """F2 at the real transport: applied, unverified, and not a tool error."""
+    upstream.read_responses["/listings/en-US"] = (
+        404, {"error": {"code": 404, "message": "listing not found"}})
+
     async def body(session, init):
         edit = payload_of(await session.call_tool("play_edit_insert", {"package_name": PKG}))
         edit_id = edit["data"]["edit_id"]
-        return await session.call_tool("play_edit_commit", {
-            "package_name": PKG, "edit_id": edit_id, "confirm_edit_id": edit_id,
+        return await session.call_tool("play_listing_update", {
+            "package_name": PKG, "edit_id": edit_id, "language": "en-US",
+            "title": "NEW",
         })
 
-    before = len(upstream.requests)
     result = await with_client(upstream, body)
-    assert result.is_error is True
-    assert "release gate" in result.content[0].text
-    # Only the edit insert was sent; no commit reached the upstream.
-    assert not any(r.path.endswith(":commit") for r in upstream.requests)
+    assert result.is_error is not True
+    payload = payload_of(result)
+    assert payload["data"]["outcome"] == "applied_unverified"
+    assert payload["data"]["verification"]["verified"] is False
+    puts = [r for r in upstream.requests if r.method == "PUT"]
+    assert len(puts) == 1
 
 
 async def test_staging_into_a_foreign_edit_is_refused(upstream):

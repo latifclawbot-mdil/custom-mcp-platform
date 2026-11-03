@@ -55,10 +55,11 @@ class Settings:
 
     ``enable_artifact_upload`` gates the binary upload operations (bundle/apk
     staging and deobfuscation files). It defaults to **off**: those operations
-    are safe on their own (nothing publishes without ``edits.commit``, which is
-    not exposed) but they consume significant bandwidth and storage, so they are
-    an explicit opt-in rather than a default. When off, calling them returns a
-    clear "disabled by configuration" refusal naming this environment variable.
+    are safe on their own (this server exposes no commit at all, so nothing is
+    published through it) but they consume significant bandwidth and storage, so
+    they are an explicit opt-in rather than a default. When off, calling them
+    returns a clear "disabled by configuration" refusal naming this environment
+    variable.
     """
 
     packages: frozenset[str] = field(default_factory=frozenset)
@@ -121,9 +122,11 @@ class Settings:
     def require_release_gate_enabled(self, operation: str) -> None:
         """Fail closed on a release-gated operation when the gate is off.
 
-        ``edits.commit`` and ``edits.tracks.update`` are the two methods that can
-        change what users receive. They are off unless an operator deliberately
-        turns them on, so the shipped default surface can never publish.
+        ``edits.tracks.update`` and ``edits.tracks.create`` are the two methods
+        that decide what a release would ship. They are off unless an operator
+        deliberately turns them on, so the shipped default surface cannot stage
+        a release at all. (``edits.commit`` is not gated — it is disabled
+        outright; see ``policy.DISABLED_METHODS``.)
         """
         if not self.enable_release_gate:
             raise SettingsError(

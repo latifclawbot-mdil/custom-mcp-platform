@@ -15,6 +15,7 @@ from typing import Any
 
 from .policy import (
     ALLOWED_WRITE_METHODS,
+    DISABLED_REASONS,
     EXCLUDED_METHODS,
     EXCLUSION_NOTES,
     FINANCIAL_METHODS,
@@ -32,17 +33,22 @@ UNSUPPORTED_CAPABILITIES: tuple[dict[str, str], ...] = (
     {
         "capability": "publish an edit (apply staged changes to production)",
         "reason": (
-            "edits.commit is behind a default-off release gate "
-            "(PLAY_WRITER_ENABLE_RELEASE_GATE). It is never enabled implicitly, "
-            "and when enabled it only accepts an edit id this server opened."
+            "Not supported at all: commit is disabled, not merely gated. The "
+            "Android Publisher API exposes no endpoint that lists what is "
+            "staged in an edit, and an edit id is a shared handle, so this "
+            "server cannot establish that a commit would not apply a financial "
+            "change staged by another actor. Under the financial exclusion the "
+            "only fail-closed choice is to expose no commit."
         ),
     },
     {
-        "capability": "create or patch a track definition (edits.tracks.create/patch)",
+        "capability": "patch a track definition (edits.tracks.patch)",
         "reason": (
-            "Only edits.tracks.update exists here, because it is the single "
-            "create-or-replace call for a track's release list. create/patch are "
-            "redundant duplicates of the same gate."
+            "edits.tracks.patch is PATCH to the same path as edits.tracks.update "
+            "with the same Track body; Google documents no behavioural difference "
+            "beyond the verb, so it is redundant. Creating a track IS supported "
+            "(play_track_create, edits.tracks.create), which tracks.update cannot "
+            "do because its track id is a path parameter."
         ),
     },
     {
@@ -105,8 +111,11 @@ UNSUPPORTED_CAPABILITIES: tuple[dict[str, str], ...] = (
     {
         "capability": "upload to the internal app-sharing channel",
         "reason": (
-            "internalappsharingartifacts.* is an artifact channel with no gate "
-            "beyond the API scope; excluded."
+            "internalappsharingartifacts.* is an internal-only artifact channel, "
+            'gated by the Play Console permission "Release apps to testing '
+            'tracks" (which cannot publish to production). Excluded on '
+            "channel-scope grounds; it is the lowest-risk write surface in the "
+            "API, not an ungated one."
         ),
     },
     {
@@ -120,8 +129,11 @@ UNSUPPORTED_CAPABILITIES: tuple[dict[str, str], ...] = (
     {
         "capability": "expansion files and externally-hosted APKs",
         "reason": (
-            "edits.expansionfiles.* and edits.apks.addexternallyhosted fork the "
-            "shipped artifact set; excluded."
+            "edits.expansionfiles.* and edits.apks.addexternallyhosted are "
+            "legacy artifact routes: OBB files supplement the APK rather than "
+            "replacing it, externally-hosted APKs are Managed-Play-only, and "
+            "both are superseded by App Bundle + Play Asset Delivery. Excluded "
+            "on legacy-scope grounds."
         ),
     },
     {
@@ -184,6 +196,15 @@ def capability_report(*, release_gate_enabled: bool,
         "financial_methods_excluded_count": len(FINANCIAL_METHODS),
         "implemented_write_methods_count": len(ALLOWED_WRITE_METHODS),
         "implemented_write_methods": sorted(ALLOWED_WRITE_METHODS),
+        #: Methods the API offers but this server refuses on safety grounds,
+        #: each with the reason. Distinct from an out-of-scope exclusion.
+        "disabled_methods": [
+            {"method_id": mid, "reason": reason}
+            for mid, reason in sorted(DISABLED_REASONS.items())
+        ],
+        #: Commit is not available, and the report says so as a boolean rather
+        #: than leaving a caller to infer it from the allowlist.
+        "commit_available": False,
         "gates": {
             "release_gate_enabled": release_gate_enabled,
             "artifact_upload_enabled": artifact_upload_enabled,
@@ -201,9 +222,10 @@ def capability_report(*, release_gate_enabled: bool,
         "api_limitations": list(API_LIMITATIONS),
         "claim": (
             "This is the complete, explicit set this server implements. It is "
-            "not 'all non-financial Play actions': publish gating, access "
-            "control, signing, recovery campaigns, and internal app sharing are "
-            "excluded by design, and several Play Console capabilities have no "
-            "API at all."
+            "not 'all non-financial Play actions': publishing is disabled "
+            "outright (commit cannot be proven free of financial changes), and "
+            "access control, signing, recovery campaigns, internal app sharing, "
+            "expansion files and third-party store review are excluded by "
+            "design. Several Play Console capabilities have no API at all."
         ),
     }
