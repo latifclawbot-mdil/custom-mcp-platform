@@ -47,8 +47,8 @@ _SECRET_ASSIGNMENT = re.compile(
     r"client_secret|client_id|api_key|apikey|token|password|passwd|secret|"
     r"session_id|sessionid|set-cookie|cookie|sidcc|sid|authorization|"
     r"error_description)\b"
-    r"\s*[\"']?\s*[:=]\s*"
-    r"(?:\"[^\"]*\"|'[^']*'|[^\s\"',;}\]]+)"
+    r"\s*\\*[\"']?\s*[:=]\s*"
+    r"(?:\\*\"[^\"\\]*(?:\\+[^\"\\]+)*\\*\"|'[^']*'|[^\s\"',;}\]]+)"
 )
 
 # Anything resembling a bearer/access token, OAuth code, or key marker left over
@@ -80,28 +80,17 @@ _OPAQUE_SECRET_HEADERS = frozenset({
 
 
 def redact_text(text: str) -> str:
-    """Strip credential-shaped substrings and truncate to a bounded preview.
-
-    Non-JSON bodies (proxy HTML error pages, stack traces) routinely embed
-    session cookies and internal hostnames, so they are summarised rather than
-    echoed: only the byte count and a structural hint survive.
-
-    Ordering matters: a private-key block is stripped *before* the generic
-    ``key=value`` rule, because that rule would otherwise stop at the first
-    newline inside a PEM body and leave the key material behind.
-    """
+    """Return only a safe status label; do not reflect arbitrary upstream text."""
     if not text:
         return ""
-    stripped = text.lstrip()
-    if stripped.startswith("<"):
-        return f"[non-JSON body redacted, {len(text)} bytes]"
-    out = _PEM_BLOCK.sub("[REDACTED PRIVATE KEY BLOCK]", text)
-    out = _SECRET_ASSIGNMENT.sub("[REDACTED]", out)
-    for pattern in _TOKEN_PATTERNS:
-        out = pattern.sub("[REDACTED]", out)
-    if len(out) > _MAX_BODY:
-        out = out[:_MAX_BODY] + f"... [truncated, {len(text)} bytes total]"
-    return out
+    # Upstream text can contain secrets under arbitrary keys or nested encodings.
+    # Permit only exact, canonical status labels; never echo free-form messages.
+    canonical = {
+        "PERMISSION_DENIED", "UNAUTHENTICATED", "INVALID_ARGUMENT",
+        "NOT_FOUND", "ALREADY_EXISTS", "RESOURCE_EXHAUSTED", "ABORTED",
+        "FAILED_PRECONDITION", "UNAVAILABLE", "INTERNAL", "DEADLINE_EXCEEDED",
+    }
+    return text if text in canonical else "[upstream diagnostic redacted]"
 
 
 class LocalError(Exception):
@@ -207,11 +196,18 @@ def redact_upstream_error(*, status: int, body, url: str = "", headers=None) -> 
         err = payload["error"]
         preview = json.dumps({"error": err})
 
+    # Preserve only a fixed canonical status label or an HTTP-derived category.
+    # Never reflect an upstream-supplied free-form message.
+    safe_reason = reason if reason in {
+        "PERMISSION_DENIED", "UNAUTHENTICATED", "INVALID_ARGUMENT", "NOT_FOUND",
+        "ALREADY_EXISTS", "RESOURCE_EXHAUSTED", "ABORTED", "FAILED_PRECONDITION",
+        "UNAVAILABLE", "INTERNAL", "DEADLINE_EXCEEDED",
+    } else ("UNAUTHENTICATED" if effective_status == 401 else f"HTTP {effective_status}")
     return UpstreamError(
         status=effective_status,
-        reason=reason or f"HTTP {status}",
+        reason=safe_reason,
         url=url,
-        body=preview,
+        body="",
     )
 
 

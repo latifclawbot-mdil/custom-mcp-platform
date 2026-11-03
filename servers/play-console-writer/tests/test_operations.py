@@ -347,7 +347,12 @@ def test_bundle_upload_requires_zip_magic(unlocked_ops):
 def test_bundle_upload_accepts_zip(unlocked_ops):
     operations, transport, _ = unlocked_ops
     edit = open_edit(operations, transport)
-    operations.bundle_upload(PKG, edit, base64.b64encode(b"PK\x03\x04data").decode())
+    import io
+    import zipfile
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("base/manifest/AndroidManifest.xml", b"manifest")
+    operations.bundle_upload(PKG, edit, base64.b64encode(archive.getvalue()).decode())
     verb, path, query, body = transport.writes()[0]
     assert path == f"{BASE}/edits/{edit}/bundles"
 

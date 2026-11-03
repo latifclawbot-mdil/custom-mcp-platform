@@ -1343,14 +1343,15 @@ def _zip_members(media: bytes) -> list[str] | None:
         return None
 
 
-def _require_zip(media: bytes, field: str, label: str) -> list[str] | None:
-    """Refuse a payload that is not a zip; return members if it parses as one."""
-    if not media.startswith(_ZIP_SIGNATURES):
+def _require_zip(media: bytes, field: str, label: str) -> list[str]:
+    """Refuse payloads that cannot be parsed as an archive."""
+    members = _zip_members(media)
+    if members is None:
         raise ValidationError(
             f"{field} does not look like {'an AAB' if label == 'AAB' else 'an APK'} "
-            "(expected a zip archive: no PK local-file-header signature)"
+            "(expected a readable zip archive)"
         )
-    return _zip_members(media)
+    return members
 
 
 def _sniff_image_type(media: bytes) -> str:

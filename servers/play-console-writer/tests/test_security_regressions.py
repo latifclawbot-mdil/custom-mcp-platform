@@ -36,6 +36,23 @@ def test_json_secret_fields_are_fully_redacted(key):
     assert value not in result
 
 
+@_pytest_for_secret_regression.mark.parametrize("key", ["client_secret", "private_key_id", "api_key", "password"])
+def test_embedded_json_string_secret_fields_are_fully_redacted(key):
+    from play_console_writer.errors import redact_upstream_error
+    value = "fixture-sensitive-value-never-visible-3a54"
+    nested = _json_for_secret_regression.dumps({key: value})
+    raw = _json_for_secret_regression.dumps({"error": {"message": nested}})
+    assert value not in str(redact_upstream_error(status=400, body=raw))
+
+
+@_pytest_for_secret_regression.mark.parametrize("field", ["bundle_bytes_b64", "apk_bytes_b64"])
+def test_invalid_zip_with_valid_magic_is_rejected(field):
+    from play_console_writer.validation import ValidationError
+    from play_console_writer.operations import _require_zip
+    with _pytest_for_secret_regression.raises(ValidationError):
+        _require_zip(b"PK\x03\x04not-an-archive", field, "AAB" if field.startswith("bundle") else "APK")
+
+
 import base64
 import io
 import json
@@ -120,7 +137,7 @@ def test_private_key_block_body_is_redacted_from_a_write_error():
     assert "MIIEvQ" not in message
     # The status/reason are still useful, so this is redaction, not blanking.
     assert "401" in message
-    assert "denied" in message
+    assert "UNAUTHENTICATED" in message
 
 
 def test_private_key_with_escaped_newlines_is_redacted_from_a_read_error():
@@ -190,7 +207,8 @@ def test_normal_google_error_keeps_its_diagnostic_message():
 
     message = str(info.value)
     assert "PERMISSION_DENIED" in message
-    assert "does not have permission" in message
+    assert "403" in message
+    assert "does not have permission" not in message
 
 
 # ---------------------------------------------------------------------------
