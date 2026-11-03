@@ -23,6 +23,19 @@ absence of financial side effects cannot be established.
 """
 from __future__ import annotations
 
+import json as _json_for_secret_regression
+import pytest as _pytest_for_secret_regression
+
+
+@_pytest_for_secret_regression.mark.parametrize("key", ["client_secret", "private_key_id", "api_key", "password"])
+def test_json_secret_fields_are_fully_redacted(key):
+    from play_console_writer.errors import redact_upstream_error
+    value = "fixture-sensitive-value-never-visible-3a54"
+    raw = _json_for_secret_regression.dumps({"error": {"message": "rejected", "details": [{key: value}]}})
+    result = str(redact_upstream_error(status=400, body=raw))
+    assert value not in result
+
+
 import base64
 import io
 import json

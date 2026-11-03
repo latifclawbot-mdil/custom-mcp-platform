@@ -47,7 +47,7 @@ _SECRET_ASSIGNMENT = re.compile(
     r"client_secret|client_id|api_key|apikey|token|password|passwd|secret|"
     r"session_id|sessionid|set-cookie|cookie|sidcc|sid|authorization|"
     r"error_description)\b"
-    r"\s*[:=]\s*"
+    r"\s*[\"']?\s*[:=]\s*"
     r"(?:\"[^\"]*\"|'[^']*'|[^\s\"',;}\]]+)"
 )
 
