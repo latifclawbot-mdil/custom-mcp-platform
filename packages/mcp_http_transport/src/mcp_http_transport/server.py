@@ -152,18 +152,10 @@ class PrefixNormalisingASGIApp:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") in {"http", "websocket"}:
-            root_path = scope.get("root_path") or ""
             raw_path = scope.get("path") or ""
-            canonical = raw_path.rstrip("/") in (self.path, self.path + "/")
-            # Rewrite only shapes a prefix-stripping proxy can produce:
-            #   "" or "/"            -> the prefix was stripped entirely
-            #   "/<prefix>/mcp"      -> router kept the prefix in the path
-            # Everything else keeps its own route (and therefore its own 404);
-            # blanket rewriting would turn every unknown path into an MCP
-            # request and make the endpoint look more permissive than it is.
-            stripped = raw_path in ("", "/")
-            suffixed = raw_path.rstrip("/").endswith(self.path)
-            if not canonical and (stripped or suffixed or root_path):
+            # Only a fully stripped endpoint is rewritten. A suffix match or an
+            # unrelated root_path must never make a different URL serve MCP.
+            if raw_path in ("", "/"):
                 scope = dict(scope)
                 scope["path"] = self.path
                 scope["root_path"] = ""

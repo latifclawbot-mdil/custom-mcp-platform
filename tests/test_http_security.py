@@ -357,6 +357,24 @@ async def test_unknown_path_is_not_rewritten_into_the_mcp_endpoint(server_spec, 
         assert response.status_code == 404, (response.status_code, response.text)
 
 
+@pytest.mark.parametrize("unrelated_path", ["/anything/mcp", "/prefix/nested/mcp"])
+async def test_unrelated_suffix_is_not_rewritten_into_mcp(server_spec, tmp_path, unrelated_path):
+    import httpx
+
+    with running_server(server_spec, tmp_path) as server:
+        response = httpx.post(
+            server.url.replace("/mcp", unrelated_path),
+            json=initialize_body(),
+            headers={
+                "accept": "application/json, text/event-stream",
+                "content-type": "application/json",
+                "authorization": f"Bearer {TEST_TOKEN}",
+            },
+            timeout=30.0,
+        )
+        assert response.status_code == 404, (response.status_code, response.text)
+
+
 async def test_prefix_stripped_request_is_routed_to_the_mcp_endpoint(server_spec, tmp_path):
     """A proxy that strips the path prefix leaves "" or "/"; both must route."""
     import httpx

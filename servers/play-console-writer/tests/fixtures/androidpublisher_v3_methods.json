@@ -1,0 +1,883 @@
+{
+ "source": "https://androidpublisher.googleapis.com/$discovery/rest?version=v3",
+ "name": "androidpublisher",
+ "version": "v3",
+ "revision": "20261102",
+ "rootUrl": "https://androidpublisher.googleapis.com/",
+ "scopes": [
+  "https://www.googleapis.com/auth/androidpublisher"
+ ],
+ "method_count": 145,
+ "methods": {
+  "applications.dataSafety": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/dataSafety",
+   "request": "SafetyLabelsUpdateRequest",
+   "response": "SafetyLabelsUpdateResponse"
+  },
+  "applications.deviceTierConfigs.create": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/deviceTierConfigs",
+   "request": "DeviceTierConfig",
+   "response": "DeviceTierConfig"
+  },
+  "applications.deviceTierConfigs.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/deviceTierConfigs/{deviceTierConfigId}",
+   "request": null,
+   "response": "DeviceTierConfig"
+  },
+  "applications.deviceTierConfigs.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/deviceTierConfigs",
+   "request": null,
+   "response": "ListDeviceTierConfigsResponse"
+  },
+  "applications.tracks.releases.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/{+parent}/releases",
+   "request": null,
+   "response": "ListReleaseSummariesResponse"
+  },
+  "apprecovery.addTargeting": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/appRecoveries/{appRecoveryId}:addTargeting",
+   "request": "AddTargetingRequest",
+   "response": "AddTargetingResponse"
+  },
+  "apprecovery.cancel": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/appRecoveries/{appRecoveryId}:cancel",
+   "request": "CancelAppRecoveryRequest",
+   "response": "CancelAppRecoveryResponse"
+  },
+  "apprecovery.create": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/appRecoveries",
+   "request": "CreateDraftAppRecoveryRequest",
+   "response": "AppRecoveryAction"
+  },
+  "apprecovery.deploy": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/appRecoveries/{appRecoveryId}:deploy",
+   "request": "DeployAppRecoveryRequest",
+   "response": "DeployAppRecoveryResponse"
+  },
+  "apprecovery.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/appRecoveries",
+   "request": null,
+   "response": "ListAppRecoveriesResponse"
+  },
+  "appsigning.enrollApp": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{name}/appSigning:enrollApp",
+   "request": "EnrollAppRequest",
+   "response": "EnrollAppResponse"
+  },
+  "appsigning.rotateAppSigningKey": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{name}/appSigning:rotateAppSigningKey",
+   "request": "RotateAppSigningKeyRequest",
+   "response": "RotateAppSigningKeyResponse"
+  },
+  "appstoreappsreview.createappstorehostedapp": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/appstore/{appStorePackageName}/apps:create",
+   "request": "CreateAppStoreHostedAppRequest",
+   "response": "CreateAppStoreHostedAppResponse"
+  },
+  "appstoreappsreview.updateappstorehostedapp": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/appstore/{appStorePackageName}/apps:update",
+   "request": "UpdateAppStoreHostedAppRequest",
+   "response": "UpdateAppStoreHostedAppResponse"
+  },
+  "appstoreappsreview.updateappstorehostedapppublishstatus": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/appstore/{appStorePackageName}/apps/{packageName}:updateAppStoreHostedAppPublishStatus",
+   "request": "UpdateAppStoreHostedAppPublishStatusRequest",
+   "response": "UpdateAppStoreHostedAppPublishStatusResponse"
+  },
+  "appstoreappsreview.uploadapk": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/appstore/{appStorePackageName}/apps/{packageName}/apks:upload",
+   "request": "UploadApkRequest",
+   "response": "UploadApkResponse"
+  },
+  "appstoreappsreview.uploadappstoreapppolicydeclarationfile": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/appstore/{appStorePackageName}/apps/{packageName}/policyDeclarationFiles:upload",
+   "request": "UploadAppStoreAppPolicyDeclarationFileRequest",
+   "response": "UploadAppStoreAppPolicyDeclarationFileResponse"
+  },
+  "appstoreappsreview.uploadimage": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/appstore/{appStorePackageName}/apps/{packageName}/images:upload",
+   "request": "UploadImageRequest",
+   "response": "UploadImageResponse"
+  },
+  "appstorecatalog.recentappviews.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/appstorecatalog/{appStorePackageName}/recentAppViews/{playAppPackageName}",
+   "request": null,
+   "response": "RecentAppView"
+  },
+  "appstorecatalog.recentupdateevents.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/appstorecatalog/{appStorePackageName}/recentUpdateEvents",
+   "request": null,
+   "response": "ListRecentUpdateEventsResponse"
+  },
+  "edits.apks.addexternallyhosted": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/apks/externallyHosted",
+   "request": "ApksAddExternallyHostedRequest",
+   "response": "ApksAddExternallyHostedResponse"
+  },
+  "edits.apks.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/apks",
+   "request": null,
+   "response": "ApksListResponse"
+  },
+  "edits.apks.upload": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/apks",
+   "request": null,
+   "response": "Apk"
+  },
+  "edits.bundles.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/bundles",
+   "request": null,
+   "response": "BundlesListResponse"
+  },
+  "edits.bundles.upload": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/bundles",
+   "request": null,
+   "response": "Bundle"
+  },
+  "edits.commit": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}:commit",
+   "request": null,
+   "response": "AppEdit"
+  },
+  "edits.countryavailability.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/countryAvailability/{track}",
+   "request": null,
+   "response": "TrackCountryAvailability"
+  },
+  "edits.delete": {
+   "verb": "DELETE",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}",
+   "request": null,
+   "response": null
+  },
+  "edits.deobfuscationfiles.upload": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/apks/{apkVersionCode}/deobfuscationFiles/{deobfuscationFileType}",
+   "request": null,
+   "response": "DeobfuscationFilesUploadResponse"
+  },
+  "edits.details.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/details",
+   "request": null,
+   "response": "AppDetails"
+  },
+  "edits.details.patch": {
+   "verb": "PATCH",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/details",
+   "request": "AppDetails",
+   "response": "AppDetails"
+  },
+  "edits.details.update": {
+   "verb": "PUT",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/details",
+   "request": "AppDetails",
+   "response": "AppDetails"
+  },
+  "edits.expansionfiles.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/apks/{apkVersionCode}/expansionFiles/{expansionFileType}",
+   "request": null,
+   "response": "ExpansionFile"
+  },
+  "edits.expansionfiles.patch": {
+   "verb": "PATCH",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/apks/{apkVersionCode}/expansionFiles/{expansionFileType}",
+   "request": "ExpansionFile",
+   "response": "ExpansionFile"
+  },
+  "edits.expansionfiles.update": {
+   "verb": "PUT",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/apks/{apkVersionCode}/expansionFiles/{expansionFileType}",
+   "request": "ExpansionFile",
+   "response": "ExpansionFile"
+  },
+  "edits.expansionfiles.upload": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/apks/{apkVersionCode}/expansionFiles/{expansionFileType}",
+   "request": null,
+   "response": "ExpansionFilesUploadResponse"
+  },
+  "edits.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}",
+   "request": null,
+   "response": "AppEdit"
+  },
+  "edits.images.delete": {
+   "verb": "DELETE",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/listings/{language}/{imageType}/{imageId}",
+   "request": null,
+   "response": null
+  },
+  "edits.images.deleteall": {
+   "verb": "DELETE",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/listings/{language}/{imageType}",
+   "request": null,
+   "response": "ImagesDeleteAllResponse"
+  },
+  "edits.images.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/listings/{language}/{imageType}",
+   "request": null,
+   "response": "ImagesListResponse"
+  },
+  "edits.images.upload": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/listings/{language}/{imageType}",
+   "request": null,
+   "response": "ImagesUploadResponse"
+  },
+  "edits.insert": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits",
+   "request": "AppEdit",
+   "response": "AppEdit"
+  },
+  "edits.listings.delete": {
+   "verb": "DELETE",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/listings/{language}",
+   "request": null,
+   "response": null
+  },
+  "edits.listings.deleteall": {
+   "verb": "DELETE",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/listings",
+   "request": null,
+   "response": null
+  },
+  "edits.listings.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/listings/{language}",
+   "request": null,
+   "response": "Listing"
+  },
+  "edits.listings.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/listings",
+   "request": null,
+   "response": "ListingsListResponse"
+  },
+  "edits.listings.patch": {
+   "verb": "PATCH",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/listings/{language}",
+   "request": "Listing",
+   "response": "Listing"
+  },
+  "edits.listings.update": {
+   "verb": "PUT",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/listings/{language}",
+   "request": "Listing",
+   "response": "Listing"
+  },
+  "edits.testers.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/testers/{track}",
+   "request": null,
+   "response": "Testers"
+  },
+  "edits.testers.patch": {
+   "verb": "PATCH",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/testers/{track}",
+   "request": "Testers",
+   "response": "Testers"
+  },
+  "edits.testers.update": {
+   "verb": "PUT",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/testers/{track}",
+   "request": "Testers",
+   "response": "Testers"
+  },
+  "edits.tracks.create": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/tracks",
+   "request": "TrackConfig",
+   "response": "Track"
+  },
+  "edits.tracks.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/tracks/{track}",
+   "request": null,
+   "response": "Track"
+  },
+  "edits.tracks.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/tracks",
+   "request": null,
+   "response": "TracksListResponse"
+  },
+  "edits.tracks.patch": {
+   "verb": "PATCH",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/tracks/{track}",
+   "request": "Track",
+   "response": "Track"
+  },
+  "edits.tracks.update": {
+   "verb": "PUT",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}/tracks/{track}",
+   "request": "Track",
+   "response": "Track"
+  },
+  "edits.validate": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/edits/{editId}:validate",
+   "request": null,
+   "response": "AppEdit"
+  },
+  "externaltransactions.createexternaltransaction": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/{+parent}/externalTransactions",
+   "request": "ExternalTransaction",
+   "response": "ExternalTransaction"
+  },
+  "externaltransactions.getexternaltransaction": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/{+name}",
+   "request": null,
+   "response": "ExternalTransaction"
+  },
+  "externaltransactions.refundexternaltransaction": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/{+name}:refund",
+   "request": "RefundExternalTransactionRequest",
+   "response": "ExternalTransaction"
+  },
+  "generatedapks.download": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/generatedApks/{versionCode}/downloads/{downloadId}:download",
+   "request": null,
+   "response": null
+  },
+  "generatedapks.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/generatedApks/{versionCode}",
+   "request": null,
+   "response": "GeneratedApksListResponse"
+  },
+  "grants.create": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/{+parent}/grants",
+   "request": "Grant",
+   "response": "Grant"
+  },
+  "grants.delete": {
+   "verb": "DELETE",
+   "path": "/androidpublisher/v3/{+name}",
+   "request": null,
+   "response": null
+  },
+  "grants.patch": {
+   "verb": "PATCH",
+   "path": "/androidpublisher/v3/{+name}",
+   "request": "Grant",
+   "response": "Grant"
+  },
+  "inappproducts.batchDelete": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/inappproducts:batchDelete",
+   "request": "InappproductsBatchDeleteRequest",
+   "response": null
+  },
+  "inappproducts.batchGet": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/inappproducts:batchGet",
+   "request": null,
+   "response": "InappproductsBatchGetResponse"
+  },
+  "inappproducts.batchUpdate": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/inappproducts:batchUpdate",
+   "request": "InappproductsBatchUpdateRequest",
+   "response": "InappproductsBatchUpdateResponse"
+  },
+  "inappproducts.delete": {
+   "verb": "DELETE",
+   "path": "/androidpublisher/v3/applications/{packageName}/inappproducts/{sku}",
+   "request": null,
+   "response": null
+  },
+  "inappproducts.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/inappproducts/{sku}",
+   "request": null,
+   "response": "InAppProduct"
+  },
+  "inappproducts.insert": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/inappproducts",
+   "request": "InAppProduct",
+   "response": "InAppProduct"
+  },
+  "inappproducts.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/inappproducts",
+   "request": null,
+   "response": "InappproductsListResponse"
+  },
+  "inappproducts.patch": {
+   "verb": "PATCH",
+   "path": "/androidpublisher/v3/applications/{packageName}/inappproducts/{sku}",
+   "request": "InAppProduct",
+   "response": "InAppProduct"
+  },
+  "inappproducts.update": {
+   "verb": "PUT",
+   "path": "/androidpublisher/v3/applications/{packageName}/inappproducts/{sku}",
+   "request": "InAppProduct",
+   "response": "InAppProduct"
+  },
+  "internalappsharingartifacts.uploadapk": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/internalappsharing/{packageName}/artifacts/apk",
+   "request": null,
+   "response": "InternalAppSharingArtifact"
+  },
+  "internalappsharingartifacts.uploadbundle": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/internalappsharing/{packageName}/artifacts/bundle",
+   "request": null,
+   "response": "InternalAppSharingArtifact"
+  },
+  "monetization.convertRegionPrices": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/pricing:convertRegionPrices",
+   "request": "ConvertRegionPricesRequest",
+   "response": "ConvertRegionPricesResponse"
+  },
+  "monetization.onetimeproducts.batchDelete": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts:batchDelete",
+   "request": "BatchDeleteOneTimeProductsRequest",
+   "response": null
+  },
+  "monetization.onetimeproducts.batchGet": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts:batchGet",
+   "request": null,
+   "response": "BatchGetOneTimeProductsResponse"
+  },
+  "monetization.onetimeproducts.batchUpdate": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts:batchUpdate",
+   "request": "BatchUpdateOneTimeProductsRequest",
+   "response": "BatchUpdateOneTimeProductsResponse"
+  },
+  "monetization.onetimeproducts.delete": {
+   "verb": "DELETE",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts/{productId}",
+   "request": null,
+   "response": null
+  },
+  "monetization.onetimeproducts.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts/{productId}",
+   "request": null,
+   "response": "OneTimeProduct"
+  },
+  "monetization.onetimeproducts.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts",
+   "request": null,
+   "response": "ListOneTimeProductsResponse"
+  },
+  "monetization.onetimeproducts.patch": {
+   "verb": "PATCH",
+   "path": "/androidpublisher/v3/applications/{packageName}/onetimeproducts/{productId}",
+   "request": "OneTimeProduct",
+   "response": "OneTimeProduct"
+  },
+  "monetization.onetimeproducts.purchaseOptions.batchDelete": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts/{productId}/purchaseOptions:batchDelete",
+   "request": "BatchDeletePurchaseOptionsRequest",
+   "response": null
+  },
+  "monetization.onetimeproducts.purchaseOptions.batchUpdateStates": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts/{productId}/purchaseOptions:batchUpdateStates",
+   "request": "BatchUpdatePurchaseOptionStatesRequest",
+   "response": "BatchUpdatePurchaseOptionStatesResponse"
+  },
+  "monetization.onetimeproducts.purchaseOptions.offers.activate": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts/{productId}/purchaseOptions/{purchaseOptionId}/offers/{offerId}:activate",
+   "request": "ActivateOneTimeProductOfferRequest",
+   "response": "OneTimeProductOffer"
+  },
+  "monetization.onetimeproducts.purchaseOptions.offers.batchDelete": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts/{productId}/purchaseOptions/{purchaseOptionId}/offers:batchDelete",
+   "request": "BatchDeleteOneTimeProductOffersRequest",
+   "response": null
+  },
+  "monetization.onetimeproducts.purchaseOptions.offers.batchGet": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts/{productId}/purchaseOptions/{purchaseOptionId}/offers:batchGet",
+   "request": "BatchGetOneTimeProductOffersRequest",
+   "response": "BatchGetOneTimeProductOffersResponse"
+  },
+  "monetization.onetimeproducts.purchaseOptions.offers.batchUpdate": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts/{productId}/purchaseOptions/{purchaseOptionId}/offers:batchUpdate",
+   "request": "BatchUpdateOneTimeProductOffersRequest",
+   "response": "BatchUpdateOneTimeProductOffersResponse"
+  },
+  "monetization.onetimeproducts.purchaseOptions.offers.batchUpdateStates": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts/{productId}/purchaseOptions/{purchaseOptionId}/offers:batchUpdateStates",
+   "request": "BatchUpdateOneTimeProductOfferStatesRequest",
+   "response": "BatchUpdateOneTimeProductOfferStatesResponse"
+  },
+  "monetization.onetimeproducts.purchaseOptions.offers.cancel": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts/{productId}/purchaseOptions/{purchaseOptionId}/offers/{offerId}:cancel",
+   "request": "CancelOneTimeProductOfferRequest",
+   "response": "OneTimeProductOffer"
+  },
+  "monetization.onetimeproducts.purchaseOptions.offers.deactivate": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts/{productId}/purchaseOptions/{purchaseOptionId}/offers/{offerId}:deactivate",
+   "request": "DeactivateOneTimeProductOfferRequest",
+   "response": "OneTimeProductOffer"
+  },
+  "monetization.onetimeproducts.purchaseOptions.offers.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/oneTimeProducts/{productId}/purchaseOptions/{purchaseOptionId}/offers",
+   "request": null,
+   "response": "ListOneTimeProductOffersResponse"
+  },
+  "monetization.subscriptions.archive": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}:archive",
+   "request": "ArchiveSubscriptionRequest",
+   "response": "Subscription"
+  },
+  "monetization.subscriptions.basePlans.activate": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans/{basePlanId}:activate",
+   "request": "ActivateBasePlanRequest",
+   "response": "Subscription"
+  },
+  "monetization.subscriptions.basePlans.batchMigratePrices": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans:batchMigratePrices",
+   "request": "BatchMigrateBasePlanPricesRequest",
+   "response": "BatchMigrateBasePlanPricesResponse"
+  },
+  "monetization.subscriptions.basePlans.batchUpdateStates": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans:batchUpdateStates",
+   "request": "BatchUpdateBasePlanStatesRequest",
+   "response": "BatchUpdateBasePlanStatesResponse"
+  },
+  "monetization.subscriptions.basePlans.deactivate": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans/{basePlanId}:deactivate",
+   "request": "DeactivateBasePlanRequest",
+   "response": "Subscription"
+  },
+  "monetization.subscriptions.basePlans.delete": {
+   "verb": "DELETE",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans/{basePlanId}",
+   "request": null,
+   "response": null
+  },
+  "monetization.subscriptions.basePlans.migratePrices": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans/{basePlanId}:migratePrices",
+   "request": "MigrateBasePlanPricesRequest",
+   "response": "MigrateBasePlanPricesResponse"
+  },
+  "monetization.subscriptions.basePlans.offers.activate": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans/{basePlanId}/offers/{offerId}:activate",
+   "request": "ActivateSubscriptionOfferRequest",
+   "response": "SubscriptionOffer"
+  },
+  "monetization.subscriptions.basePlans.offers.batchGet": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans/{basePlanId}/offers:batchGet",
+   "request": "BatchGetSubscriptionOffersRequest",
+   "response": "BatchGetSubscriptionOffersResponse"
+  },
+  "monetization.subscriptions.basePlans.offers.batchUpdate": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans/{basePlanId}/offers:batchUpdate",
+   "request": "BatchUpdateSubscriptionOffersRequest",
+   "response": "BatchUpdateSubscriptionOffersResponse"
+  },
+  "monetization.subscriptions.basePlans.offers.batchUpdateStates": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans/{basePlanId}/offers:batchUpdateStates",
+   "request": "BatchUpdateSubscriptionOfferStatesRequest",
+   "response": "BatchUpdateSubscriptionOfferStatesResponse"
+  },
+  "monetization.subscriptions.basePlans.offers.create": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans/{basePlanId}/offers",
+   "request": "SubscriptionOffer",
+   "response": "SubscriptionOffer"
+  },
+  "monetization.subscriptions.basePlans.offers.deactivate": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans/{basePlanId}/offers/{offerId}:deactivate",
+   "request": "DeactivateSubscriptionOfferRequest",
+   "response": "SubscriptionOffer"
+  },
+  "monetization.subscriptions.basePlans.offers.delete": {
+   "verb": "DELETE",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans/{basePlanId}/offers/{offerId}",
+   "request": null,
+   "response": null
+  },
+  "monetization.subscriptions.basePlans.offers.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans/{basePlanId}/offers/{offerId}",
+   "request": null,
+   "response": "SubscriptionOffer"
+  },
+  "monetization.subscriptions.basePlans.offers.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans/{basePlanId}/offers",
+   "request": null,
+   "response": "ListSubscriptionOffersResponse"
+  },
+  "monetization.subscriptions.basePlans.offers.patch": {
+   "verb": "PATCH",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}/basePlans/{basePlanId}/offers/{offerId}",
+   "request": "SubscriptionOffer",
+   "response": "SubscriptionOffer"
+  },
+  "monetization.subscriptions.batchGet": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions:batchGet",
+   "request": null,
+   "response": "BatchGetSubscriptionsResponse"
+  },
+  "monetization.subscriptions.batchUpdate": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions:batchUpdate",
+   "request": "BatchUpdateSubscriptionsRequest",
+   "response": "BatchUpdateSubscriptionsResponse"
+  },
+  "monetization.subscriptions.create": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions",
+   "request": "Subscription",
+   "response": "Subscription"
+  },
+  "monetization.subscriptions.delete": {
+   "verb": "DELETE",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}",
+   "request": null,
+   "response": null
+  },
+  "monetization.subscriptions.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}",
+   "request": null,
+   "response": "Subscription"
+  },
+  "monetization.subscriptions.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions",
+   "request": null,
+   "response": "ListSubscriptionsResponse"
+  },
+  "monetization.subscriptions.patch": {
+   "verb": "PATCH",
+   "path": "/androidpublisher/v3/applications/{packageName}/subscriptions/{productId}",
+   "request": "Subscription",
+   "response": "Subscription"
+  },
+  "orders.batchget": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/orders:batchGet",
+   "request": null,
+   "response": "BatchGetOrdersResponse"
+  },
+  "orders.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/orders/{orderId}",
+   "request": null,
+   "response": "Order"
+  },
+  "orders.refund": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/orders/{orderId}:refund",
+   "request": null,
+   "response": null
+  },
+  "orders.reviewrefund": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/orders/{orderId}:reviewrefund",
+   "request": "OrdersReviewRefundRequest",
+   "response": null
+  },
+  "purchases.products.acknowledge": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/purchases/products/{productId}/tokens/{token}:acknowledge",
+   "request": "ProductPurchasesAcknowledgeRequest",
+   "response": null
+  },
+  "purchases.products.consume": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/purchases/products/{productId}/tokens/{token}:consume",
+   "request": null,
+   "response": null
+  },
+  "purchases.products.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/purchases/products/{productId}/tokens/{token}",
+   "request": null,
+   "response": "ProductPurchase"
+  },
+  "purchases.productsv2.getproductpurchasev2": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/purchases/productsv2/tokens/{token}",
+   "request": null,
+   "response": "ProductPurchaseV2"
+  },
+  "purchases.subscriptions.acknowledge": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/purchases/subscriptions/{subscriptionId}/tokens/{token}:acknowledge",
+   "request": "SubscriptionPurchasesAcknowledgeRequest",
+   "response": null
+  },
+  "purchases.subscriptions.cancel": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/purchases/subscriptions/{subscriptionId}/tokens/{token}:cancel",
+   "request": null,
+   "response": null
+  },
+  "purchases.subscriptions.defer": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/purchases/subscriptions/{subscriptionId}/tokens/{token}:defer",
+   "request": "SubscriptionPurchasesDeferRequest",
+   "response": "SubscriptionPurchasesDeferResponse"
+  },
+  "purchases.subscriptionsv2.cancel": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/purchases/subscriptionsv2/tokens/{token}:cancel",
+   "request": "CancelSubscriptionPurchaseRequest",
+   "response": "CancelSubscriptionPurchaseResponse"
+  },
+  "purchases.subscriptionsv2.defer": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/purchases/subscriptionsv2/tokens/{token}:defer",
+   "request": "DeferSubscriptionPurchaseRequest",
+   "response": "DeferSubscriptionPurchaseResponse"
+  },
+  "purchases.subscriptionsv2.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/purchases/subscriptionsv2/tokens/{token}",
+   "request": null,
+   "response": "SubscriptionPurchaseV2"
+  },
+  "purchases.subscriptionsv2.revoke": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/purchases/subscriptionsv2/tokens/{token}:revoke",
+   "request": "RevokeSubscriptionPurchaseRequest",
+   "response": "RevokeSubscriptionPurchaseResponse"
+  },
+  "purchases.voidedpurchases.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/purchases/voidedpurchases",
+   "request": null,
+   "response": "VoidedPurchasesListResponse"
+  },
+  "reviews.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/reviews/{reviewId}",
+   "request": null,
+   "response": "Review"
+  },
+  "reviews.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/reviews",
+   "request": null,
+   "response": "ReviewsListResponse"
+  },
+  "reviews.reply": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/reviews/{reviewId}:reply",
+   "request": "ReviewsReplyRequest",
+   "response": "ReviewsReplyResponse"
+  },
+  "systemapks.variants.create": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/applications/{packageName}/systemApks/{versionCode}/variants",
+   "request": "Variant",
+   "response": "Variant"
+  },
+  "systemapks.variants.download": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/systemApks/{versionCode}/variants/{variantId}:download",
+   "request": null,
+   "response": null
+  },
+  "systemapks.variants.get": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/systemApks/{versionCode}/variants/{variantId}",
+   "request": null,
+   "response": "Variant"
+  },
+  "systemapks.variants.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/applications/{packageName}/systemApks/{versionCode}/variants",
+   "request": null,
+   "response": "SystemApksListResponse"
+  },
+  "users.create": {
+   "verb": "POST",
+   "path": "/androidpublisher/v3/{+parent}/users",
+   "request": "User",
+   "response": "User"
+  },
+  "users.delete": {
+   "verb": "DELETE",
+   "path": "/androidpublisher/v3/{+name}",
+   "request": null,
+   "response": null
+  },
+  "users.list": {
+   "verb": "GET",
+   "path": "/androidpublisher/v3/{+parent}/users",
+   "request": null,
+   "response": "ListUsersResponse"
+  },
+  "users.patch": {
+   "verb": "PATCH",
+   "path": "/androidpublisher/v3/{+name}",
+   "request": "User",
+   "response": "User"
+  }
+ }
+}

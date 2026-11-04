@@ -1,0 +1,30 @@
+[project]
+name = "play-console-writer-mcp"
+version = "0.1.0"
+description = "Isolated non-financial Google Play Console (Android Publisher API v3) write MCP server"
+requires-python = ">=3.11"
+# Exact pins mirroring the read-only server so the two trees cannot drift.
+dependencies = [
+    "mcp==2.3.0",
+    "google-auth==2.55.1",
+    "httpx==0.28.1",
+    "requests==2.32.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.4.2",
+    "pytest-asyncio==1.1.0",
+    "pytest-timeout==2.4.0",
+    "respx==0.22.0",
+]
+
+[project.scripts]
+play-console-writer-mcp = "play_console_writer.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/play_console_writer"]

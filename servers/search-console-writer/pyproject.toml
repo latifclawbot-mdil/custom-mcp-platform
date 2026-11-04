@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "search-console-writer-mcp"
+version = "0.1.0"
+description = "Write-capable MCP server for the four official Google Search Console mutations"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  "mcp==2.3.0",
+  "google-auth==2.55.1",
+  "requests==2.32.5",
+  # The shared transport is a workspace package. It is listed so an install
+  # fails loudly rather than silently omitting the HTTP entry point; the
+  # editable path source is declared below.
+  "mcp-http-transport",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest==8.4.2",
+  "pytest-asyncio==1.1.0",
+  "pytest-timeout==2.4.0",
+  "httpx==0.28.1",
+  "uvicorn==0.54.0",
+]
+
+[project.scripts]
+search-console-writer = "search_console_writer.__main__:main"
+search-console-writer-http = "search_console_writer.http_main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv.sources]
+mcp-http-transport = { path = "../../packages/mcp_http_transport", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["error::DeprecationWarning:search_console_writer.*"]
