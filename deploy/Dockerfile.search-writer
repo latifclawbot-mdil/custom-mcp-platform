@@ -1,0 +1,66 @@
+# syntax=docker/dockerfile:1
+#
+# Search Console *writer* MCP over authenticated MCP Streamable HTTP.
+#
+#   docker build -f deploy/Dockerfile.search-writer -t custom-mcp/search-console-writer:local .
+#
+# Writer counterpart of deploy/Dockerfile.search-console: it installs the
+# ``search-console-writer`` package (read/write ``webmasters`` scope) rather than
+# the read-only package. Same posture as the Play writer image — non-root, no
+# baked secret, only this server's package plus the shared transport, fully
+# pinned dependencies. See that file for the reasoning.
+#
+# Credential shape differs: the Search writer accepts a mounted service-account
+# JSON via GOOGLE_APPLICATION_CREDENTIALS (ADC), and the operator must keep that
+# file outside this repository and readable by uid/gid 10001.
+
+FROM python:3.11.15-slim-bookworm AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /build
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY deploy/constraints.txt /build/constraints.txt
+RUN pip install --no-deps -r /build/constraints.txt
+
+# Only the shared transport and this one server.
+COPY packages/mcp_http_transport /build/packages/mcp_http_transport
+COPY servers/search-console-writer /build/servers/search-console-writer
+
+RUN pip install --no-deps \
+        /build/packages/mcp_http_transport \
+        /build/servers/search-console-writer \
+    && find /opt/venv -name '__pycache__' -type d -prune -exec rm -rf {} + \
+    && find /opt/venv -name '*.pyc' -delete
+
+
+FROM python:3.11.15-slim-bookworm AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH= \
+    PATH="/opt/venv/bin:$PATH" \
+    MCP_HTTP_HOST=0.0.0.0 \
+    MCP_HTTP_PORT=8080 \
+    MCP_HTTP_PATH=/mcp \
+    GSC_WRITE_LOG_LEVEL=INFO
+
+RUN groupadd --gid 10001 mcp \
+    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin mcp
+
+COPY --from=builder /opt/venv /opt/venv
+
+USER 10001:10001
+WORKDIR /app
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import socket,sys; s=socket.socket(); s.settimeout(3); sys.exit(0 if s.connect_ex(('127.0.0.1',8080))==0 else 1)"]
+
+ENTRYPOINT ["python", "-m", "search_console_writer.http_main"]

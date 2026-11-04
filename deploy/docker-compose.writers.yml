@@ -1,0 +1,207 @@
+# Two *writer* containers, two distinct bearer tokens, no published ports.
+#
+# This file is the writer counterpart of deploy/docker-compose.yml and is
+# deliberately separate from it: the read-only compose is untouched, and the
+# writers carry read/write provider credentials that must be isolated from the
+# read-only servers and from each other.
+#
+# NETWORK TOPOLOGY (and the risk that comes with it)
+# --------------------------------------------------
+# Both services have no `ports:` and no `hostname:`. Their only *host* consumer
+# is LiteLLM, so they are attached to the same Docker network LiteLLM already
+# uses — the external network named `coolify` (see the `networks:` block). Each
+# service gets a fixed alias on that network (`play-console-writer-mcp`,
+# `search-console-writer-mcp`) so the gateway has a stable name to resolve
+# regardless of which project created the container.
+#
+# The reachability boundary is therefore:
+#   * no host port is published; host/network routing policy must still be
+#     checked independently (a Docker bridge is not an access firewall);
+#   * on the `coolify` network the endpoint is reachable by any container that
+#     is also attached to it, addressed as <alias>:8080;
+#   * the bearer token is the only thing that authorises a request.
+#
+# Residual risk (documented in docs/writer-deployment.md): every container on
+# the `coolify` network can attempt the endpoint. The bearer token is required;
+# anyone who has it and can reach the endpoint can bypass LiteLLM. A dedicated
+# network joined only by the gateway and writer reduces co-tenant reachability;
+# this compose file does not configure that isolation.
+#
+# THE HOST ALLOWLIST MUST MATCH THE ALIAS. MCP_HTTP_ALLOWED_HOSTS below lists
+# exactly the alias each service answers to (plus loopback for the in-container
+# healthcheck). A request whose Host header is anything else is rejected with
+# 421, so a host alias that is not in the allowlist is a silently broken
+# deployment — tests/test_writer_deploy.py asserts the two agree.
+#
+# SECRET FILE PERMISSIONS (important, and not something compose can fix)
+# ----------------------------------------------------------------------
+# The token and credential secrets use the `file:` driver. Compose delivers a
+# `file:` secret with a **bind mount**, and bind mounts do not remap ownership
+# or mode: the file arrives in the container with the *host file's* uid/gid and
+# permission bits, exactly as they are on disk. Consequently the `uid`, `gid`
+# and `mode` keys of a secret are ignored for a `file:` source, and setting them
+# here would be a false promise. Instead the operator must make each host secret
+# readable by the container user (uid/gid 10001). For a token file:
+#
+#   chown 10001:10001 /path/to/secret
+#   chmod 0400        /path/to/secret
+#
+# A root-owned 0600 file is the natural thing to create and it fails for uid
+# 10001 — the container exits at startup with a "cannot be read" error rather
+# than serving an unauthenticated endpoint.
+#
+# Build (from the repository root):
+#   docker compose -f deploy/docker-compose.writers.yml build
+#
+# Run (tokens, allowlists and credentials are files/values outside the
+# repository, one set per server; each host file must be readable by uid 10001
+# as described above):
+#   PLAY_WRITER_ALLOWED_PACKAGES=com.example.app \
+#   GSC_WRITE_ALLOWED_SITES=sc-domain:example.com \
+#   PLAY_WRITER_MCP_TOKEN_FILE=/run/host-secrets/play_writer.token \
+#   SEARCH_WRITER_MCP_TOKEN_FILE=/run/host-secrets/search_writer.token \
+#   PLAY_WRITER_SERVICE_ACCOUNT_FILE=/run/host-secrets/play_writer.json \
+#   SEARCH_WRITER_SERVICE_ACCOUNT_FILE=/run/host-secrets/search_writer.json \
+#   docker compose -f deploy/docker-compose.writers.yml up -d
+#
+# The tokens must differ, and each must differ from the read-only services'
+# tokens. Nothing in this file is a secret, and no Google identifier appears
+# here: the allowlists and credential paths come from required variables /
+# mounted secrets at run time.
+
+name: custom-mcp-writers
+
+services:
+  play-console-writer-mcp:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.play-writer
+    image: custom-mcp/play-console-writer:local
+    restart: unless-stopped
+    # No `ports:`. Reachable only by name from containers on the attached
+    # network; nothing is published on the host.
+    expose:
+      - "8080"
+    environment:
+      MCP_HTTP_PORT: "8080"
+      MCP_HTTP_HOST: "0.0.0.0"
+      MCP_HTTP_PATH: "/mcp"
+      # The token is a mounted file, not an env var, so it does not show up in
+      # `docker inspect` or in the process environment.
+      MCP_HTTP_AUTH_TOKEN_FILE: "/run/secrets/play_writer_mcp_token"
+      # Explicit Host allowlist. This must contain the alias this service is
+      # reachable under on the `coolify` network (the name LiteLLM calls), plus
+      # loopback for the in-container healthcheck. No wildcard.
+      MCP_HTTP_ALLOWED_HOSTS: "play-console-writer-mcp,127.0.0.1"
+      # Read by the server's own fail-closed startup check.
+      PLAY_WRITER_ALLOWED_PACKAGES: "${PLAY_WRITER_ALLOWED_PACKAGES:?set the Play writer package allowlist}"
+      PLAY_WRITER_CREDENTIALS_FILE: "/run/secrets/play_writer_service_account.json"
+      PLAY_WRITER_SUBJECT: "${PLAY_WRITER_SUBJECT:-}"
+      # The release gate and artifact-upload gate default to off in the server,
+      # so this service as configured cannot stage or publish a release. Left
+      # explicitly at the safe default rather than set here.
+    secrets:
+      - play_writer_mcp_token
+      - play_writer_service_account.json
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    networks:
+      # Fixed alias for the gateway. Keep in sync with MCP_HTTP_ALLOWED_HOSTS.
+      coolify:
+        aliases:
+          - play-console-writer-mcp
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import socket,sys; s=socket.socket(); s.settimeout(3); sys.exit(0 if s.connect_ex(('127.0.0.1',8080))==0 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  search-console-writer-mcp:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.search-writer
+    image: custom-mcp/search-console-writer:local
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      MCP_HTTP_PORT: "8080"
+      MCP_HTTP_HOST: "0.0.0.0"
+      MCP_HTTP_PATH: "/mcp"
+      MCP_HTTP_AUTH_TOKEN_FILE: "/run/secrets/search_writer_mcp_token"
+      # Must match the alias below (the name LiteLLM calls).
+      MCP_HTTP_ALLOWED_HOSTS: "search-console-writer-mcp,127.0.0.1"
+      GSC_WRITE_ALLOWED_SITES: "${GSC_WRITE_ALLOWED_SITES:?set the Search Console write property allowlist}"
+      GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/search_writer_service_account.json"
+      GSC_WRITE_LOG_LEVEL: "INFO"
+    secrets:
+      - search_writer_mcp_token
+      - search_writer_service_account.json
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    networks:
+      # Fixed alias for the gateway; keep in sync with MCP_HTTP_ALLOWED_HOSTS.
+      coolify:
+        aliases:
+          - search-console-writer-mcp
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import socket,sys; s=socket.socket(); s.settimeout(3); sys.exit(0 if s.connect_ex(('127.0.0.1',8080))==0 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  # The network LiteLLM is already on. Declared external so compose reads the
+  # existing Docker network instead of trying to create one.
+  coolify:
+    external: true
+    name: coolify
+
+# File-provided secrets. Provide the paths via the variables documented above;
+# none of these files may live inside this repository, and each host file must
+# be readable by uid/gid 10001 (see the permissions note at the top).
+#
+# A `file:` secret is delivered as a bind mount, so `uid`/`gid`/`mode` keys
+# would be ignored here; they are deliberately absent rather than set to values
+# that would not take effect.
+secrets:
+  play_writer_mcp_token:
+    file: "${PLAY_WRITER_MCP_TOKEN_FILE:?set PLAY_WRITER_MCP_TOKEN_FILE to a file outside the repo}"
+  search_writer_mcp_token:
+    file: "${SEARCH_WRITER_MCP_TOKEN_FILE:?set SEARCH_WRITER_MCP_TOKEN_FILE to a file outside the repo}"
+  play_writer_service_account.json:
+    file: "${PLAY_WRITER_SERVICE_ACCOUNT_FILE:?set PLAY_WRITER_SERVICE_ACCOUNT_FILE to the mounted Play writer service-account JSON}"
+  search_writer_service_account.json:
+    file: "${SEARCH_WRITER_SERVICE_ACCOUNT_FILE:?set SEARCH_WRITER_SERVICE_ACCOUNT_FILE to the mounted Search writer service-account JSON}"

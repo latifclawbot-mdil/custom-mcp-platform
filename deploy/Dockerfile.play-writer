@@ -1,0 +1,85 @@
+# syntax=docker/dockerfile:1
+#
+# Play Console *writer* MCP over authenticated MCP Streamable HTTP.
+#
+#   docker build -f deploy/Dockerfile.play-writer -t custom-mcp/play-console-writer:local .
+#
+# This image is the writer counterpart of deploy/Dockerfile.play-console. It
+# differs from it in exactly one substantive way: it installs the
+# ``play-console-writer`` package (which carries the read/write Android
+# Publisher credential) instead of the read-only package, and its entry point is
+# the writer's own HTTP module. The two must never share an image or a
+# credential.
+#
+# Properties this file is designed to have, each with the reason it matters:
+# * non-root (uid/gid 10001) — a compromised server cannot write to the image;
+# * no secret in any layer — the bearer token arrives as a mounted file at run
+#   time and the Google credential is a mounted service-account JSON; nothing is
+#   baked in;
+# * only this server's package (plus the shared transport) is installed — the
+#   Search Console writer, both read-only servers and every other writer are
+#   absent, so a bug in one server cannot reach another;
+# * pinned base image and fully pinned dependencies (deploy/constraints.txt);
+# * one process per container, no init system.
+#
+# The Play writer was stdio-only before `play_console_writer/http_main.py` was
+# added; the ENTRYPOINT below is that module. Without it a stdio container would
+# have no listening port and no bearer requirement at all.
+
+FROM python:3.11.15-slim-bookworm AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /build
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Dependencies first: this layer is cached until the pins change.
+COPY deploy/constraints.txt /build/constraints.txt
+RUN pip install --no-deps -r /build/constraints.txt
+
+# Only the shared transport and this one server.
+COPY packages/mcp_http_transport /build/packages/mcp_http_transport
+COPY servers/play-console-writer /build/servers/play-console-writer
+
+RUN pip install --no-deps \
+        /build/packages/mcp_http_transport \
+        /build/servers/play-console-writer \
+    && find /opt/venv -name '__pycache__' -type d -prune -exec rm -rf {} + \
+    && find /opt/venv -name '*.pyc' -delete
+
+
+FROM python:3.11.15-slim-bookworm AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH= \
+    PATH="/opt/venv/bin:$PATH" \
+    MCP_HTTP_HOST=0.0.0.0 \
+    MCP_HTTP_PORT=8080 \
+    MCP_HTTP_PATH=/mcp \
+    PLAY_WRITER_HTTP_LOG_LEVEL=INFO
+
+# A fixed, high uid with no shell and no home directory.
+RUN groupadd --gid 10001 mcp \
+    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin mcp
+
+COPY --from=builder /opt/venv /opt/venv
+
+USER 10001:10001
+WORKDIR /app
+
+EXPOSE 8080
+
+# Socket-level liveness only: the MCP endpoint requires a bearer token, so an
+# HTTP check would need the secret inside the image. A TCP connect proves the
+# process is accepting connections without leaking or embedding anything. It
+# proves neither authentication nor Google readiness; those are verified
+# separately.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import socket,sys; s=socket.socket(); s.settimeout(3); sys.exit(0 if s.connect_ex(('127.0.0.1',8080))==0 else 1)"]
+
+ENTRYPOINT ["python", "-m", "play_console_writer.http_main"]
