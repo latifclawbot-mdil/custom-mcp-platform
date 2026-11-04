@@ -274,6 +274,14 @@ def test_track_update_puts_release_definition_when_enabled(unlocked_ops):
     assert body["releases"][0]["releaseNotes"] == [{"language": "en-US", "text": "notes"}]
 
 
+@pytest.mark.parametrize("track", ["wear:production", "automotive:beta"])
+def test_track_update_allows_documented_prefixed_tracks(unlocked_ops, track):
+    operations, transport, _ = unlocked_ops
+    edit = open_edit(operations, transport)
+    operations.track_update(PKG, edit, track, version_codes=[42], status="draft")
+    assert transport.writes()[0][1].endswith("/tracks/" + track)
+
+
 def test_track_update_rejects_out_of_range_user_fraction(unlocked_ops):
     operations, transport, _ = unlocked_ops
     edit = open_edit(operations, transport)

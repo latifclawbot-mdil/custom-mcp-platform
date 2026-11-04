@@ -360,7 +360,9 @@ class GoogleWriteClient:
             text = _stringify(raw)
             if "/" in text or "?" in text or "#" in text or "%" in text or "\\" in text:
                 raise LocalError(f"path parameter {name} must be a single segment")
-            if ":" in text or ".." in text:
+            if ".." in text or (":" in text and not (
+                name == "track" and re.fullmatch(r"(?:wear|automotive):(production|beta|alpha|internal)", text)
+            )):
                 raise LocalError(f"path parameter {name} contains a forbidden character")
             return text
 
