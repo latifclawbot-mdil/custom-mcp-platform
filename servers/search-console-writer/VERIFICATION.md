@@ -6,7 +6,7 @@ below is from a real run; no test reaches Google or uses a real credential.
 ## Environment
 
 - Python 3.11.15, mcp 2.3.0, google-auth 2.55.1, requests 2.32.5.
-- Test interpreter: `/home/prod/repos/custom-mcp-platform/.venv/bin/python`
+- Test interpreter: the platform's existing Python virtual environment
   (used without modification).
 - Command:
   `PYTHONPATH="src:../../packages/mcp_http_transport/src" python -m pytest -c pytest.ini -q`
