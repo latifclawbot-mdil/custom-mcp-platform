@@ -178,6 +178,75 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  logto-ops-mcp:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.logto-ops
+    image: custom-mcp/logto-ops:local
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      MCP_HTTP_PORT: "8080"
+      MCP_HTTP_HOST: "0.0.0.0"
+      MCP_HTTP_PATH: "/mcp"
+      MCP_HTTP_AUTH_TOKEN_FILE: "/run/secrets/logto_mcp_token"
+      # Must match the alias below (the name LiteLLM calls).
+      MCP_HTTP_ALLOWED_HOSTS: "logto-ops-mcp,127.0.0.1"
+      # The Logto control plane this server writes to, and the M2M application
+      # it authenticates as. The M2M app needs the Management API `all` scope;
+      # that is what makes this container a tenant administrator, so its network
+      # placement and this endpoint's bearer token are the only things standing
+      # between an attacker and the identity provider.
+      LOGTO_BASE_URL: "${LOGTO_BASE_URL:?set the Logto base URL, e.g. https://auth.example.org}"
+      LOGTO_M2M_APP_ID: "${LOGTO_M2M_APP_ID:?set the Logto M2M application id}"
+      LOGTO_M2M_SECRET_FILE: "/run/secrets/logto_m2m_secret"
+      # Optional: when the Logto zone sits behind Cloudflare Access, BOTH the
+      # client id and the mounted secret must be set or the server refuses to
+      # start. With neither set, no Access headers are sent.
+      LOGTO_CF_ACCESS_SECRET_FILE: "/run/secrets/logto_cf_access_secret"
+      LOGTO_CF_ACCESS_CLIENT_ID: "${LOGTO_CF_ACCESS_CLIENT_ID:-}"
+      # Two-phase writes. `apply` requires a confirmation token for every
+      # mutation; `read` serves no writes at all. Do not set `admin` here.
+      LOGTO_MCP_MODE: "${LOGTO_MCP_MODE:-apply}"
+      # The confirmation HMAC key is a mounted file, like every other secret
+      # here, so it does not appear in `docker inspect`.
+      LOGTO_MCP_CONFIRM_SECRET_FILE: "/run/secrets/logto_confirm_secret"
+      LOGTO_MCP_CONFIRM_TTL_SECONDS: "${LOGTO_MCP_CONFIRM_TTL_SECONDS:-900}"
+    secrets:
+      - logto_mcp_token
+      - logto_m2m_secret
+      - logto_confirm_secret
+      - logto_cf_access_secret
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=8m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
+    networks:
+      coolify:
+        aliases:
+          - logto-ops-mcp
+      mcp-internal: {}
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import socket,sys; s=socket.socket(); s.settimeout(3); sys.exit(0 if s.connect_ex(('127.0.0.1',8080))==0 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   # The network LiteLLM is already on. Declared external so compose reads the
   # existing Docker network instead of trying to create one.
@@ -206,3 +275,16 @@ secrets:
     file: "${PLAY_SERVICE_ACCOUNT_FILE:?set PLAY_SERVICE_ACCOUNT_FILE to the mounted Play service-account JSON}"
   gsc_service_account.json:
     file: "${GSC_SERVICE_ACCOUNT_FILE:?set GSC_SERVICE_ACCOUNT_FILE to the mounted Search Console credential JSON}"
+  logto_mcp_token:
+    file: "${LOGTO_MCP_TOKEN_FILE:?set LOGTO_MCP_TOKEN_FILE to a file outside the repo}"
+  logto_m2m_secret:
+    file: "${LOGTO_M2M_SECRET_FILE:?set LOGTO_M2M_SECRET_FILE to a file outside the repo}"
+  logto_confirm_secret:
+    file: "${LOGTO_CONFIRM_SECRET_FILE:?set LOGTO_CONFIRM_SECRET_FILE to a file outside the repo}"
+  # Optional Cloudflare Access service token. Only mounted when
+  # LOGTO_CF_ACCESS_SECRET_FILE is set: compose can only mount a real file, and
+  # requiring one on an unprotected zone would be a deployment trap. When the
+  # zone IS protected, both this file and LOGTO_CF_ACCESS_CLIENT_ID must be set —
+  # the server refuses to start with only one of them.
+  logto_cf_access_secret:
+    file: "${LOGTO_CF_ACCESS_SECRET_FILE:-/dev/null}"

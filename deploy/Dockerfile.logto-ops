@@ -1,0 +1,70 @@
+# syntax=docker/dockerfile:1
+#
+# Logto ops MCP over authenticated MCP Streamable HTTP.
+#
+#   docker build -f deploy/Dockerfile.logto-ops -t logto-ops-mcp:local .
+#
+# Same posture as the Google servers: non-root, no baked secret, only this
+# server's package installed, pinned dependencies, read-only root filesystem at
+# run time (see docker-compose.yml).
+#
+# Differences that matter for this image:
+#
+#  * Two credentials are mounted at run time, not one: the Logto M2M client
+#    secret and (optionally) a Cloudflare Access service-token secret. Neither
+#    appears in the image, in build args, or in the environment.
+#  * The confirmation HMAC key is an environment secret rather than a file. It
+#    is read once at startup and never logged; a `file:` secret would be more
+#    consistent, and is noted as a follow-up in docs/logto-ops-security.md.
+#  * Writes are on by default in `apply` mode. The mode is a build-independent
+#    runtime setting, so the same image can serve read-only.
+
+FROM python:3.11.15-slim-bookworm AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /build
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY deploy/constraints.txt /build/constraints.txt
+RUN pip install --no-deps -r /build/constraints.txt
+
+COPY packages/mcp_http_transport /build/packages/mcp_http_transport
+COPY servers/logto-ops /build/servers/logto-ops
+
+RUN pip install --no-deps \
+        /build/packages/mcp_http_transport \
+        /build/servers/logto-ops \
+    && find /opt/venv -name '__pycache__' -type d -prune -exec rm -rf {} + \
+    && find /opt/venv -name '*.pyc' -delete
+
+
+FROM python:3.11.15-slim-bookworm AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH= \
+    PATH="/opt/venv/bin:$PATH" \
+    MCP_HTTP_HOST=0.0.0.0 \
+    MCP_HTTP_PORT=8080 \
+    MCP_HTTP_PATH=/mcp \
+    LOGTO_MCP_LOG_LEVEL=INFO
+
+RUN groupadd --gid 10001 mcp \
+    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin mcp
+
+COPY --from=builder /opt/venv /opt/venv
+
+USER 10001:10001
+WORKDIR /app
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import socket,sys; s=socket.socket(); s.settimeout(3); sys.exit(0 if s.connect_ex(('127.0.0.1',8080))==0 else 1)"]
+
+ENTRYPOINT ["python", "-m", "logto_ops.http_main"]

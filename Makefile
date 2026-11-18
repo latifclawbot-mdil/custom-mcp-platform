@@ -7,10 +7,10 @@ SHELL := /usr/bin/env bash
 .SHELLFLAGS := -eu -o pipefail -c
 
 PY := .venv/bin/python
-LIBS := packages/mcp_http_transport/src:servers/play-console/src:servers/search-console/src
+LIBS := packages/mcp_http_transport/src:servers/play-console/src:servers/search-console/src:servers/logto-ops/src
 
 .DEFAULT_GOAL := help
-.PHONY: help venv sync test test-http test-fast test-upstream test-play test-search integrity lint clean images
+.PHONY: help venv sync test test-http test-fast test-upstream test-play test-search test-logto integrity lint clean images
 
 help:
 	@echo "make sync        create/refresh .venv from the pinned lock"
@@ -18,6 +18,7 @@ help:
 	@echo "make test-http   only the authenticated HTTP protocol/security tests"
 	@echo "make test-fast   unit tests only (no server subprocesses)"
 	@echo "make test-upstream  run each vendored server's own original suite"
+	@echo "make test-logto   run the logto-ops suite (gate, confirmations, HTTP)"
 	@echo "make integrity   check the vendored trees against the committed manifest"
 	@echo "make images      build both container images (needs docker)"
 	@echo "make clean       remove caches and bytecode"
@@ -56,9 +57,13 @@ test-play:
 test-search:
 	cd servers/search-console && PYTHONPATH="src:../../packages/mcp_http_transport/src" ../../$(PY) -m pytest -q -p no:cacheprovider
 
+test-logto:
+	PYTHONPATH="$(LIBS)" $(PY) -m pytest servers/logto-ops/tests tests/test_logto_ops_http.py tests/test_logto_ops_deployment.py -q -p no:cacheprovider --timeout=180
+
 images:
 	docker build -f deploy/Dockerfile.play-console -t custom-mcp/play-console:local .
 	docker build -f deploy/Dockerfile.search-console -t custom-mcp/search-console:local .
+	docker build -f deploy/Dockerfile.logto-ops -t custom-mcp/logto-ops:local .
 
 clean:
 	find . -path ./.venv -prune -o -name '__pycache__' -type d -print -exec rm -rf {} +
