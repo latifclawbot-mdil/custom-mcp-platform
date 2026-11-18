@@ -76,7 +76,7 @@ All secrets are files, not environment values.
 
 | Variable | Meaning |
 |---|---|
-| `LOGTO_BASE_URL` | Logto core host, https only (e.g. `https://auth.xsama.org`) |
+| `LOGTO_BASE_URL` | Logto core host, https only (e.g. `https://auth.example.org`) |
 | `LOGTO_M2M_APP_ID` | M2M application id |
 | `LOGTO_M2M_SECRET_FILE` | file containing that app's client secret (mode 0600) |
 | `LOGTO_CF_ACCESS_CLIENT_ID` | optional; Cloudflare Access service token id |
@@ -89,14 +89,14 @@ All secrets are files, not environment values.
 | `LOGTO_REQUEST_TIMEOUT` / `LOGTO_HTTP_TIMEOUT` | seconds |
 | `MCP_HTTP_*` | the shared transport: token file, host allowlist, port |
 
-`auth.xsama.org` sits behind Cloudflare Access, so a self-hosted deployment
-normally needs the `LOGTO_CF_ACCESS_*` pair. Setting only one of them is a
-startup error.
+When the Logto core host sits behind Cloudflare Access, a deployment needs the
+`LOGTO_CF_ACCESS_*` pair as well. Setting only one of the two is a startup
+error; setting neither sends no Access headers.
 
 ## Local run
 
 ```bash
-export LOGTO_BASE_URL=https://auth.xsama.org
+export LOGTO_BASE_URL=https://auth.example.org
 export LOGTO_M2M_APP_ID=<id>
 export LOGTO_M2M_SECRET_FILE=/path/to/m2m.secret     # chmod 600
 export LOGTO_MCP_CONFIRM_SECRET_FILE=/path/to/confirm.key

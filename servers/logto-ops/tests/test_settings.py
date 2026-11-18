@@ -28,7 +28,7 @@ def write_secret(tmp_path, value: str = "s3cr3t-client-secret-value", mode: int 
 def base_env(tmp_path, **overrides):
     env = {
         ENV_BASE_URL: "https://auth.example.org",
-        ENV_APP_ID: "spg9p4spdwoip4dfi51wg",
+        ENV_APP_ID: "example-app-id-0123456789",
         ENV_SECRET_FILE: write_secret(tmp_path, name="m2m_secret"),
     }
     env.update(overrides)
