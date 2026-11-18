@@ -25,7 +25,11 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[1]
 COMPOSE = REPO / "deploy" / "docker-compose.yml"
-DOCKERFILES = [REPO / "deploy" / "Dockerfile.play-console", REPO / "deploy" / "Dockerfile.search-console"]
+DOCKERFILES = [
+    REPO / "deploy" / "Dockerfile.play-console",
+    REPO / "deploy" / "Dockerfile.search-console",
+    REPO / "deploy" / "Dockerfile.logto-ops",
+]
 
 #: Bash-style interpolation that would otherwise break a plain YAML load.
 PLACEHOLDER = re.compile(r"\$\{[^}]*\}")
@@ -51,12 +55,15 @@ def compose() -> dict:
     return load_compose()
 
 
-def test_compose_is_valid_yaml_with_both_services(compose):
+SERVICES = ("play-console-mcp", "search-console-mcp", "logto-ops-mcp")
+
+
+def test_compose_is_valid_yaml_with_all_services(compose):
     services = compose["services"]
-    assert set(services) == {"play-console-mcp", "search-console-mcp"}
+    assert set(services) == set(SERVICES)
 
 
-@pytest.mark.parametrize("service_name", ["play-console-mcp", "search-console-mcp"])
+@pytest.mark.parametrize("service_name", SERVICES)
 def test_no_service_publishes_a_host_port(compose, service_name):
     service = compose["services"][service_name]
     assert "ports" not in service, "a published port is a public endpoint"
@@ -64,7 +71,7 @@ def test_no_service_publishes_a_host_port(compose, service_name):
     assert service["expose"] == ["8080"]
 
 
-@pytest.mark.parametrize("service_name", ["play-console-mcp", "search-console-mcp"])
+@pytest.mark.parametrize("service_name", SERVICES)
 def test_services_join_the_external_coolify_network_and_the_local_bridge(compose, service_name):
     """LiteLLM reaches these by alias on `coolify`; the local bridge stays for east-west.
 
@@ -86,7 +93,7 @@ def test_services_join_the_external_coolify_network_and_the_local_bridge(compose
     assert compose["networks"]["mcp-internal"].get("attachable") is False
 
 
-@pytest.mark.parametrize("service_name", ["play-console-mcp", "search-console-mcp"])
+@pytest.mark.parametrize("service_name", SERVICES)
 def test_each_service_has_a_stable_coolify_alias_matching_its_allowlist(compose, service_name):
     """The alias LiteLLM resolves must be an entry in MCP_HTTP_ALLOWED_HOSTS.
 
@@ -127,7 +134,16 @@ def test_google_credentials_are_separate_per_service(compose):
 
 @pytest.mark.parametrize(
     "secret_name",
-    ["play_mcp_token", "gsc_mcp_token", "play_service_account.json", "gsc_service_account.json"],
+    [
+        "play_mcp_token",
+        "gsc_mcp_token",
+        "play_service_account.json",
+        "gsc_service_account.json",
+        "logto_mcp_token",
+        "logto_m2m_secret",
+        "logto_confirm_secret",
+        "logto_cf_access_secret",
+    ],
 )
 def test_file_secrets_declare_no_uid_gid_or_mode(compose, secret_name):
     """A ``file:`` secret is a bind mount; ``uid``/``gid``/``mode`` do not apply.
@@ -145,16 +161,25 @@ def test_file_secrets_declare_no_uid_gid_or_mode(compose, secret_name):
     """
     secret = compose["secrets"][secret_name]
     assert set(secret) == {"file"}, secret
-    # The path must be a *required* variable (`${VAR:?...}`): a missing secret
-    # path should abort the deploy, not silently point at a wrong file. Inspect
-    # the top-level `secrets:` block of the raw source, since the parsed view
-    # has placeholders substituted.
+    # Every secret path must be sourced from an operator variable. Required
+    # (`${VAR:?...}`) is the rule for anything the server cannot run without: a
+    # missing path must abort the deploy rather than silently point at a wrong
+    # file. The single permitted exception is the optional Cloudflare Access
+    # token, spelled `${VAR:-/dev/null}`, because that service starts happily
+    # with no Access token and an unconditional mount requirement would be a
+    # deployment trap on an unprotected zone. The exception is named here, not
+    # inferred, so adding a fourth optional secret forces a deliberate edit.
+    OPTIONAL_SECRETS = {"logto_cf_access_secret"}
     raw = COMPOSE.read_text(encoding="utf-8")
     block = raw.split("\nsecrets:", 1)[1]
     for name in compose["secrets"]:
         line = block.split(f"\n  {name}:", 1)[1].split("\n", 1)[1].strip()
         assert line.startswith("file:"), line
-        assert ":?" in line, f"{name} path must be a required variable: {line}"
+        assert "${" in line, f"{name} path must come from a variable: {line}"
+        if name in OPTIONAL_SECRETS:
+            assert ":-" in line, f"{name} is optional but is not defaulted: {line}"
+        else:
+            assert ":?" in line, f"{name} path must be a required variable: {line}"
 
 
 def test_compose_documents_the_secret_permission_requirement():
@@ -179,7 +204,7 @@ def test_no_token_is_passed_as_a_plain_environment_value(compose):
         assert "MCP_HTTP_AUTH_TOKEN_FILE" in service["environment"]
 
 
-@pytest.mark.parametrize("service_name", ["play-console-mcp", "search-console-mcp"])
+@pytest.mark.parametrize("service_name", SERVICES)
 def test_hardening_defaults_are_present(compose, service_name):
     service = compose["services"][service_name]
     assert service["read_only"] is True
@@ -189,7 +214,7 @@ def test_hardening_defaults_are_present(compose, service_name):
     assert service["healthcheck"]["test"][0] == "CMD"
 
 
-@pytest.mark.parametrize("service_name", ["play-console-mcp", "search-console-mcp"])
+@pytest.mark.parametrize("service_name", SERVICES)
 def test_host_allowlist_is_explicit_and_has_no_wildcard(compose, service_name):
     hosts = compose["services"][service_name]["environment"]["MCP_HTTP_ALLOWED_HOSTS"]
     entries = [entry.strip() for entry in hosts.split(",")]
@@ -220,14 +245,22 @@ def test_dockerfile_installs_only_one_server_package(dockerfile: Path):
     text = dockerfile.read_text(encoding="utf-8")
     copied = [line for line in text.splitlines() if line.startswith("COPY servers/")]
     assert len(copied) == 1, copied
-    other = "search-console" if "play-console" in dockerfile.name else "play-console"
-    assert other not in text, "one image must not contain the other server's code"
+    own = copied[0].split()[1].split("/")[1]
+    for other in ("play-console", "search-console", "logto-ops"):
+        if other != own:
+            assert other not in text, f"one image must not contain {other}'s code"
 
 
 @pytest.mark.parametrize("dockerfile", DOCKERFILES, ids=lambda path: path.name)
 def test_dockerfile_has_no_secret_and_no_credential_copy(dockerfile: Path):
     text = dockerfile.read_text(encoding="utf-8")
-    for forbidden in ("PLAY_CONSOLE_CREDENTIALS_FILE=", "GOOGLE_APPLICATION_CREDENTIALS=", "MCP_HTTP_AUTH_TOKEN="):
+    for forbidden in (
+        "PLAY_CONSOLE_CREDENTIALS_FILE=",
+        "GOOGLE_APPLICATION_CREDENTIALS=",
+        "MCP_HTTP_AUTH_TOKEN=",
+        "LOGTO_M2M_SECRET=",
+        "LOGTO_MCP_CONFIRM_SECRET=",
+    ):
         assert forbidden not in text
     # No JSON/credential file may be COPYed into the image.
     assert not re.search(r"COPY .*\.json", text)
